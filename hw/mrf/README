@@ -1,0 +1,26 @@
+simulation of Micro Reseach Finland event timing devices
+
+
+qemu-system-i386 \
+-no-reboot -m 1024 -usbdevice tablet -enable-kvm \
+-hda disk.img \
+-net nic -net user,hostfwd=tcp::5064-:5064 \
+-chardev socket,id=foo,host=127.0.0.1,port=9060,server,nowait \
+-device mrf-pmcevr-230,chardev=foo \
+-chardev socket,id=foo2,host=127.0.0.1,port=9060,nowait \
+-device mrf-cpci-evg-230,chardev=foo2
+
+
+
+Timing link simulation Protocol for chardev
+
+4 byte frames.
+
+buf[0] == 0xe1  # identification
+buf[1] # bit array
+ 0x01 # link active
+ 0x02 # set - data is dbus, clear data is buf
+ 0x04 # set - buf data is first byte
+ 0x08 # set - buf data is last byte
+buf[2] # event code
+buf[3] # data
