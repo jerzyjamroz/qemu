@@ -64,6 +64,7 @@ typedef struct {
     unsigned int pciint:1;
     /* evg */
     unsigned int masterena:1;
+    unsigned int irqactive:1;
     uint8_t dbus;
 
     uint32_t evgreg[64*1024/4];
@@ -115,7 +116,12 @@ plx9030_mmio_read(void *opaque, hwaddr addr, unsigned size)
     case 0x28: /* LAS0BRD */
         return s->evgbe ? 0x01000000 : 0;
     case 0x4c: /* INTCSR */
-        return s->pciint ? 0x43 : 0x03; /* INT1 enable, invert polarity, PCI enable/disable */
+    {
+        uint64_t ret = 0x03; /* INT1 enable, active high */
+        if(s->pciint) ret |= 0x40; /* PCI interrupt enabled */
+        if(s->irqactive) ret |= 0x04; /* INT1 active */
+        return ret;
+    }
     case 0x54: /* GPIOC */
         return 0x00249924;
     default:
@@ -180,7 +186,7 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
             s->evgreg[addr>>2] |= 0x200; /* pending */
 
             buf[0] = 0xe1;
-            buf[1] = 0x02; /* payload is dbus */
+            buf[1] = 0x03; /* payload is dbus, link active */
             buf[2] = val&0xff; /* event */
             buf[3] = s->dbus;
             link_send(s, buf, 4);
@@ -243,6 +249,14 @@ void chr_link_event(void *opaque, int event)
     switch(event) {
     case CHR_EVENT_OPENED:
         DBGOUT("linkevent => opened\n");
+    {
+        uint8_t buf[4];
+        buf[0] = 0xe1;
+        buf[1] = 0x03; /* payload is dbus, link active */
+        buf[2] = 0; /* idle event */
+        buf[3] = d->dbus;
+        link_send(d, buf, 4);
+    }
         break;
     case CHR_EVENT_CLOSED:
         DBGOUT("linkevent => closed\n");

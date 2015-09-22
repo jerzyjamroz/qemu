@@ -67,6 +67,7 @@ typedef struct MRFPCIState {
     unsigned int pciint:1;
     /* evr */
     unsigned int masterena:1;
+    unsigned int irqactive:1;
     unsigned int linkup:1;
     unsigned int linkupprev:1;
 
@@ -112,6 +113,7 @@ void mrf_evr_update(MRFPCIState *s)
         int level = s->pciint && ena&0x80000000 && actirq;
         DBGOUT("IRQ %d Flag %08x Act %08x Ena %08x\n", level,
                (unsigned)rawirq, (unsigned)actirq, (unsigned)ena);
+        s->irqactive = !!level;
         pci_set_irq(&s->parent_obj, !!level);
     }
 }
@@ -145,7 +147,12 @@ plx9030_mmio_read(void *opaque, hwaddr addr, unsigned size)
     case 0x28: /* LAS0BRD */
         return s->evrbe ? 0x01000000 : 0;
     case 0x4c: /* INTCSR */
-        return s->pciint ? 0x43 : 0x03; /* INT1 enable, invert polarity, PCI enable/disable */
+    {
+        uint64_t ret = 0x03; /* INT1 enable, active high */
+        if(s->pciint) ret |= 0x40; /* PCI interrupt enabled */
+        if(s->irqactive) ret |= 0x04; /* INT1 active */
+        return ret;
+    }
     case 0x54: /* GPIOC */
         return 0x00249924;
     default:
