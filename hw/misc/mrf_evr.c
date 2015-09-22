@@ -313,7 +313,7 @@ void chr_link_read(void *opaque, const uint8_t *buf, int size)
     mrf_evr_update(d);
 
     if(d->rxbuflen && d->rxbuf!=pbuf)
-        memcpy(d->rxbuf, pbuf, d->rxbuflen);
+        memmove(d->rxbuf, pbuf, d->rxbuflen);
 }
 
 static
