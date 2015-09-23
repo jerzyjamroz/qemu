@@ -189,6 +189,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     /* R/O registers */
     case 0x00: /* Status */
     case 0x2C: /* Version */
+    case 0x50:
     case 0x70:
     case 0x74:
     case 0x78:
@@ -349,6 +350,7 @@ static void mrf_evr_reset(DeviceState *dev)
 
     s->evrreg[0x00>>2] = 0x00010000; /* link violation */
     s->evrreg[0x2C>>2] = 0x11000003; /* PMC EVR w/ FW version 3 */
+    s->evrreg[0x50>>2] = 0x00000200; /* always show PLL locked */
 
     /* TODO, mapping ram defaults */
     /* TODO, SFP info */

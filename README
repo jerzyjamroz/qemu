@@ -1,5 +1,11 @@
-Modification of QEMU to simulator Micro Reseach Finland devices
+Modification of QEMU to simulate Micro Reseach Finland event timing devices
 
-qemu-system-i386 ... \
+
+qemu-system-i386 \
+-no-reboot -m 1024 -usbdevice tablet -enable-kvm \
+-hda disk.img \
+-net nic -net user,hostfwd=tcp::5064-:5064 \
 -chardev socket,id=foo,host=127.0.0.1,port=9060,server,nowait \
--device mrf-pmcevr-230,chardev=foo
+-device mrf-pmcevr-230,chardev=foo \
+-chardev socket,id=foo2,host=127.0.0.1,port=9060,nowait \
+-device mrf-pcievg-230,chardev=foo2
