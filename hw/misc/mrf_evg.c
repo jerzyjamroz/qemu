@@ -73,6 +73,25 @@ typedef struct {
 #define TXBUFREM(D) (sizeof(d->txbuf) - d->txbuflen)
 
 static
+void mrf_evg_update(EVGState *s)
+{
+    uint32_t rawirq, actirq, ena;
+
+    rawirq = s->evgreg[0x08>>2]; /* include already active, unack'd */
+
+    ena = s->evgreg[0x0C>>2];
+    actirq = rawirq & ena; /* Mask disabled */
+
+    {
+        int level = s->pciint && ena&0x80000000 && actirq;
+        DBGOUT("IRQ %d Flag %08x Act %08x Ena %08x\n", level,
+               (unsigned)rawirq, (unsigned)actirq, (unsigned)ena);
+        s->irqactive = !!level;
+        pci_set_irq(&s->parent_obj, !!level);
+    }
+}
+
+static
 void link_send(EVGState *d, const uint8_t *buf, size_t blen)
 {
     int ret;
@@ -88,6 +107,47 @@ void link_send(EVGState *d, const uint8_t *buf, size_t blen)
     }
 }
 
+static
+void evg_seq_play(EVGState *d, int seq)
+{
+    size_t i;
+    size_t ctrl = (seq==0 ? 0x70   : 0x74)>>2;
+    size_t base = (seq==0 ? 0x8000 : 0xC000)>>2;
+
+    if((d->evgreg[ctrl]&0x02000000) || !(d->evgreg[ctrl]&0x01000000))
+        return; /* already running or not enabled */
+
+    DBGOUT("Play sequencer %d\n", seq);
+
+    d->evgreg[ctrl] |=  0x02000000; /* Running */
+    d->evgreg[0x08>>2] |= 1<<(8+seq); /* indicate start of seq */
+    mrf_evg_update(d);
+
+    for(i=base; i<base+2048*2; i+=2)
+    {
+        uint8_t buf[4];
+        uint32_t evt = d->evgreg[i+1]; /* event code is in odd numbered reg. */
+
+        evt&=0xff;
+        if(evt==0x7f)
+            break;
+
+        buf[0] = 0xe1;
+        buf[1] = 0x03; /* payload is dbus, link active */
+        buf[2] = evt;
+        buf[3] = d->dbus;
+        link_send(d, buf, 4);
+    }
+
+    d->evgreg[ctrl] &=  ~0x02000000; /* stopped */
+    if(d->evgreg[ctrl]&0x00100000) /* single shot mode */
+        d->evgreg[ctrl] &=  ~0x01000000; /* disable */
+    d->evgreg[0x08>>2] |= 1<<(12+seq); /* indicate end of seq */
+    mrf_evg_update(d);
+
+    DBGOUT("Done sequencer %d\n", seq);
+}
+
 static void
 plx9030_mmio_write(void *opaque, hwaddr addr, uint64_t val,
                  unsigned size)
@@ -99,6 +159,7 @@ plx9030_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         break;
     case 0x4c: /* INTCSR */
         s->pciint = !!(val&0x40);
+        mrf_evg_update(s);
         break;
     case 0x54: /* GPIOC */
         break; /* ignore */
@@ -174,6 +235,11 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         val &= 0x1ff; /* SW can't set pending bit */
         val |= s->evgreg[addr>>2]&0x200;
         break;
+    case 0x70: /* sequencer control */
+    case 0x74:
+        val &= 0x00ff00ff;
+        val |= s->evgreg[addr>>2]&0x03000000; /* persist Enable and Running */
+        break;
     }
 
     s->evgreg[addr>>2] = val;
@@ -195,6 +261,26 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
             DBGOUT("Sent Sw event %u\n", (unsigned)(val&0xff));
         } else
             WRNOUT("Sw event can't send while pending\n");
+        break;
+    case 0x70: /* sequencer control */
+    case 0x74:
+        if(val&0x00010000) { /* Enable */
+            s->evgreg[addr>>2] |=  0x01000000;
+            s->evgreg[addr>>2] &= ~0x00010000;
+        }
+        if(val&0x00060000) { /* Disable or reset */
+            s->evgreg[addr>>2] &= ~0x03060000;
+        }
+        if(val&0x00200000) { /* SW trigger */
+            int seq = !!(addr&0x4); /* is this write for sequencer 0 or 1? */
+            s->evgreg[addr>>2] &= ~0x00200000; /* SW trig. is write only */
+
+            /* run sequencer(s) which are set to soft trig. on this command */
+            if((s->evgreg[0x70>>2]&0xff)==17+seq)
+                evg_seq_play(s, 0);
+            if((s->evgreg[0x74>>2]&0xff)==17+seq)
+                evg_seq_play(s, 1);
+        }
         break;
     }
 }
