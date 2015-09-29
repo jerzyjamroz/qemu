@@ -8,4 +8,4 @@ qemu-system-i386 \
 -chardev socket,id=foo,host=127.0.0.1,port=9060,server,nowait \
 -device mrf-pmcevr-230,chardev=foo \
 -chardev socket,id=foo2,host=127.0.0.1,port=9060,nowait \
--device mrf-pcievg-230,chardev=foo2
+-device mrf-cpci-evg-230,chardev=foo2
