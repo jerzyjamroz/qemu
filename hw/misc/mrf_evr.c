@@ -38,7 +38,7 @@
 
 #define NELEM(N) (sizeof(N)/sizeof((N)[0]))
 
-#define TYPE_MRF_EVR_BASE "mrf-pmcevr-230"
+#define TYPE_MRF_EVR_BASE "mrf-evr"
 
 #define MRF_EVR(obj) \
     OBJECT_CHECK(MRFPCIState, (obj), TYPE_MRF_EVR_BASE)
@@ -62,6 +62,7 @@ typedef struct MRFPCIState {
     MemoryRegion plx9030;
     MemoryRegion evr;
 
+    unsigned int extbridge:1; /* 1 - PLX 9030, 0 - integrated */
     /* plx 9030 */
     unsigned int evrbe:1;
     unsigned int pciint:1;
@@ -110,7 +111,7 @@ void mrf_evr_update(MRFPCIState *s)
     actirq = rawirq & ena; /* Mask disabled */
 
     {
-        int level = s->pciint && ena&0x80000000 && actirq;
+        int level = s->pciint && (ena&0x80000000) && actirq;
         DBGOUT("IRQ %d Flag %08x Act %08x Ena %08x\n", level,
                (unsigned)rawirq, (unsigned)actirq, (unsigned)ena);
         s->irqactive = !!level;
@@ -179,11 +180,13 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     if(s->evrbe)
         val = __bswap_32(val);
 
-    if(addr<0x100)
-        DBGOUT("write "TARGET_FMT_plx" = %08x\n", addr, (unsigned)val);
+    if(addr>=0x1200 && addr<0x1400)
+        return; /* SFP info, RO */
 
-    if(addr>0x8200 && addr<0x8300+512)
-        return; /* SFP info */
+    if(addr<0x100) {
+        DBGOUT("write "TARGET_FMT_plx" = %08x\n", addr, (unsigned)val);
+        DBGOUT("  from %08x\n", (unsigned)s->evrreg[addr>>2]);
+    }
 
     switch(addr) {
     /* R/O registers */
@@ -200,6 +203,10 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
             s->fifo_in = s->fifo_out = 0;
         }
         s->masterena = !!(val&0x80000000);
+        if(!s->extbridge) {
+            s->evrbe = !(val&0x02000000);
+        }
+        val &= 0xff8067f8;
         break;
     /* masked registers */
     case 0x08: /* IRQFlag */
@@ -208,7 +215,12 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         val = s->evrreg[addr>>2] & ~(s->evrreg[addr>>2]&val);
         break;
     case 0x0C: /* IRQEnable */
-        val &= 0x8000007f;
+        if(!s->extbridge) {
+            s->pciint = !!(val&0x40000000);
+        } else {
+            val &= ~0x40000000;
+        }
+        val &= 0xc000007f;
         break;
     }
 
@@ -220,6 +232,10 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     case 0x0C: /* IRQEnable */
         mrf_evr_update(s);
         break;
+    }
+
+    if(addr<0x100) {
+        DBGOUT("  to   %08x\n", (unsigned)s->evrreg[addr>>2]);
     }
 }
 
@@ -351,16 +367,21 @@ static void mrf_evr_reset(DeviceState *dev)
     s->evrreg[0x00>>2] = 0x00010000; /* link violation */
     s->evrreg[0x2C>>2] = 0x11000003; /* PMC EVR w/ FW version 3 */
     s->evrreg[0x50>>2] = 0x00000200; /* always show PLL locked */
+    if(!s->extbridge) {
+        s->evrbe = 1;
+        s->evrreg[0x2C>>2] = 0x14000009; /* cPCI EVR w/ FW version 7 */
+    } else {
+        s->evrreg[0x2C>>2] = 0x11000003; /* PMC EVR w/ FW version 3 */
+    }
 
     /* TODO, mapping ram defaults */
     /* TODO, SFP info */
 }
 
-static int mrf_evr_init(PCIDevice *pci_dev)
+static int mrf_evr_init_230(PCIDevice *pci_dev)
 {
-    /*DeviceState *dev = DEVICE(pci_dev);*/
     MRFPCIState *d = MRF_EVR(pci_dev);
-    /*PCIDeviceClass *pdc = PCI_DEVICE_GET_CLASS(pci_dev);*/
+    d->extbridge = 1;
 
     pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
 
@@ -379,12 +400,30 @@ static int mrf_evr_init(PCIDevice *pci_dev)
     return 0;
 }
 
+static int mrf_evr_init_300(PCIDevice *pci_dev)
+{
+    MRFPCIState *d = MRF_EVR(pci_dev);
+
+    pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
+
+    memory_region_init_io(&d->evr, OBJECT(d), &evr_mmio_ops, d,
+                          "mrf-evr", sizeof(d->evrreg));
+
+    pci_register_bar(pci_dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->evr);
+
+    if(d->chr) {
+        qemu_chr_add_handlers(d->chr, chr_link_can_read, chr_link_read, chr_link_event, d);
+    }
+
+    return 0;
+}
+
 static Property mrfevrport_properties[] = {
     DEFINE_PROP_CHR("chardev", MRFPCIState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void mrf_evr_class_init(ObjectClass *klass, void *data)
+static void mrf_evr_class_init_230(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
@@ -397,9 +436,29 @@ static void mrf_evr_class_init(ObjectClass *klass, void *data)
     k->class_id = 0x1180;
     /* TODO capabilities? */
     k->revision = 2;
-    k->init = &mrf_evr_init;
+    k->init = &mrf_evr_init_230;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->desc = "Micro Research PCI EVR";
+    dc->desc = "Micro Research PMC-EVR-230";
+    dc->reset = mrf_evr_reset;
+    dc->props = mrfevrport_properties;
+}
+
+static void mrf_evr_class_init_300(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+    /*MRFPCIBaseClass *e = MRF_EVR_DEVICE_CLASS(klass);*/
+
+    k->vendor_id = 0x1a3e; /* MRF */
+    k->device_id = 0x152c;
+    k->subsystem_vendor_id = 0x1a3e;
+    k->subsystem_id = 0x152c;
+    k->class_id = 0x1180;
+    /* TODO capabilities? */
+    k->revision = 2;
+    k->init = &mrf_evr_init_300;
+    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
+    dc->desc = "Micro Research cPCI-EVR-300";
     dc->reset = mrf_evr_reset;
     dc->props = mrfevrport_properties;
 }
@@ -409,12 +468,26 @@ static const TypeInfo mrf_evr_base_info = {
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(MRFPCIState),
     .class_size    = sizeof(MRFPCIBaseClass),
-    .class_init    = mrf_evr_class_init,
+    .abstract      = true,
+};
+
+static const TypeInfo mrf_evr_230_info = {
+    .name          = "mrf-pmc-evr-230",
+    .parent        = TYPE_MRF_EVR_BASE,
+    .class_init    = mrf_evr_class_init_230,
+};
+
+static const TypeInfo mrf_evr_300_info = {
+    .name          = "mrf-cpci-evr-300",
+    .parent        = TYPE_MRF_EVR_BASE,
+    .class_init    = mrf_evr_class_init_300,
 };
 
 static void mrf_evr_register_types(void)
 {
     type_register_static(&mrf_evr_base_info);
+    type_register_static(&mrf_evr_230_info);
+    type_register_static(&mrf_evr_300_info);
 }
 
 type_init(mrf_evr_register_types)
