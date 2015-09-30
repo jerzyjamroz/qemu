@@ -180,7 +180,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     if(s->evrbe)
         val = __bswap_32(val);
 
-    if(addr>=0x1200 && addr<0x1400)
+    if(addr>=0x8200 && addr<0x8400)
         return; /* SFP info, RO */
 
     if(addr<0x100) {
@@ -360,8 +360,12 @@ void chr_link_event(void *opaque, int event)
     }
 }
 
+static
+uint32_t sfp_rom[512>>2];
+
 static void mrf_evr_reset(DeviceState *dev)
 {
+    unsigned i;
     MRFPCIState *s = MRF_EVR(dev);
 
     s->evrreg[0x00>>2] = 0x00010000; /* link violation */
@@ -375,7 +379,10 @@ static void mrf_evr_reset(DeviceState *dev)
     }
 
     /* TODO, mapping ram defaults */
-    /* TODO, SFP info */
+
+    for(i=0; i<NELEM(sfp_rom); i++) {
+        s->evrreg[(0x8200>>2)+i] = sfp_rom[i];
+    }
 }
 
 static int mrf_evr_init_230(PCIDevice *pci_dev)
@@ -491,3 +498,40 @@ static void mrf_evr_register_types(void)
 }
 
 type_init(mrf_evr_register_types)
+
+/* Captured from live cPCI-EVR-300 w/ firmware version 7 */
+static
+uint32_t sfp_rom[512>>2] = {
+    0x03040700, 0x00000020, 0x400c1501, 0x2b000000,
+    0x0f070000, 0x41564147, 0x4f202020, 0x20202020,
+    0x20202020, 0x0000176a, 0x41464252, 0x2d353752,
+    0x3541505a, 0x20202020, 0x20202020, 0x0352009b,
+    0x001a0000, 0x41383135, 0x31394555, 0x43572020,
+    0x20202020, 0x31353035, 0x30362020, 0x68f00121,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x0000407e, 0x005c9002, 0x44010052, 0x00730061,
+    0xae0048ed, 0x04ff0001, 0x02ec013e, 0x00000003,
+    0x4002661b, 0xef42cd1d, 0xd7bc1867, 0x3feb32cf,
+    0x69555776, 0x3f983b40, 0x918bc8ea, 0x3eb0df4d,
+    0x7e548804, 0xbf000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x6400d800, 0x5500f600, 0x98586978, 0x8dcc7404,
+    0x138803e8, 0x138803e8, 0x1b5801f4, 0x177003e8,
+    0xffdc0000, 0x2af801ea, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x3f800000, 0x00000000, 0x01000000,
+    0x01000000, 0x01000000, 0x01000000, 0x080000c2,
+    0x1f9d8215, 0x0a5a0ed3, 0x0ef10000, 0x00001000,
+    0x00000000, 0x00000000, 0x00000042, 0x55594100,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00c000c0, 0x00000000,
+};
