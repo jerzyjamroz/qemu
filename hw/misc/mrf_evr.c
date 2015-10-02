@@ -71,9 +71,13 @@ typedef struct MRFPCIState {
     unsigned int irqactive:1;
     unsigned int linkup:1;
     unsigned int linkupprev:1;
+    unsigned int dbuf_ena:1;
 
     EVRFifoEntry fifo[512];
     unsigned fifo_in, fifo_out; /* buffer pointers */
+
+    uint32_t dbuf;
+    unsigned dbuf_in;
 
     uint32_t evrreg[64*1024/4];
 
@@ -222,6 +226,20 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         }
         val &= 0xc000007f;
         break;
+    case 0x20: /* buffer rx */
+        if(val&0x00008000) {
+            s->dbuf_ena = 1;
+            s->dbuf = 0;
+            s->dbuf_in = 0;
+        }
+        if(val&0x00004000) {
+            s->dbuf_ena = 0;
+            s->dbuf = 0;
+            s->dbuf_in = 0;
+        }
+        val &= 0x00001000;
+        val |= s->evrreg[addr>>2]&~0x00001000;
+        break;
     }
 
     s->evrreg[addr>>2] = val;
@@ -313,8 +331,38 @@ void chr_link_read(void *opaque, const uint8_t *buf, int size)
 
             if(pbuf[1]&0x02)
                 DBGOUT("Rx Event %02x DBus %02x\n", event, pbuf[3]);
-            else
+            else {
                 DBGOUT("Rx Event %02x Data %02x\n", event, pbuf[3]);
+                if(d->dbuf_ena && (d->evrreg[0x20>>2]&0x00001000)) {
+                    d->evrreg[0x20>>2] |= 0x00008000; /* receiving */
+
+                    if(pbuf[1]&0x4) {
+                        DBGOUT(" Start\n");
+                        /* first byte */
+                        d->dbuf_in = 0;
+                        d->dbuf = 0;
+                    }
+                    d->dbuf <<= 8;
+                    d->dbuf |= pbuf[3];
+                    d->dbuf_in++;
+                    d->dbuf_in &= 0x7ff;
+
+                    if((d->dbuf_in&0x3)==0 && d->dbuf_in!=0) {
+                        d->evrreg[(0x800>>2)+(d->dbuf_in>>2)-1] = d->dbuf;
+                        d->dbuf = 0;
+                    }
+                    if(pbuf[1]&0x08) {
+                        DBGOUT(" End\n");
+                        /* last byte */
+                        d->evrreg[0x20>>2] &= ~0x00008fff; /* stop receiving and clear size */
+                        d->evrreg[0x20>>2] |=  0x00004000; /* ready */
+                        d->evrreg[0x20>>2] |=  d->dbuf_in;
+                        d->evrreg[0x08>>2] |=  0x00000020;
+                        d->dbuf_ena = 0;
+                        mrf_evr_update(d);
+                    }
+                }
+            }
             /* TODO: check for Data when not in mux'd mode */
 
             if(!fifosave || !d->masterena || d->evrreg[0x04>>2]&0x08) {
@@ -375,7 +423,7 @@ static void mrf_evr_reset(DeviceState *dev)
         s->evrbe = 1;
         s->evrreg[0x2C>>2] = 0x14000009; /* cPCI EVR w/ FW version 7 */
     } else {
-        s->evrreg[0x2C>>2] = 0x11000003; /* PMC EVR w/ FW version 3 */
+        s->evrreg[0x2C>>2] = 0x11000009; /* PMC EVR w/ FW version 3 */
     }
 
     /* TODO, mapping ram defaults */

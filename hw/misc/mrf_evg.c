@@ -149,6 +149,48 @@ void evg_seq_play(EVGState *d, int seq)
     DBGOUT("Done sequencer %d\n", seq);
 }
 
+static
+void evg_dbuf_send(EVGState *d)
+{
+    uint8_t buf[4];
+    uint32_t ctrl = d->evgreg[0x20>>2];
+    unsigned i, N = (ctrl>>2)&0x1ff;
+
+    d->evgreg[0x20>>2] &= ~0x00040000;
+
+    // Mode shared and TX enabled
+    if((ctrl&0x00030000)!=0x00030000) {
+        DBGOUT("DBuf can't send when not enabled 0x%08x\n",(unsigned)ctrl);
+        return;
+    }
+
+    DBGOUT("DBuf send %u bytes\n", 4*N);
+
+    d->evgreg[0x20>>2] |= 0x00080000; /* running */
+
+    buf[0] = 0xe1;
+    buf[1] = 0x05; /* payload is buf, first byte, link active */
+    buf[2] = 0; /* event code */
+
+    for(i=0; i<N; i++)
+    {
+        uint32_t raw = d->evgreg[(0x800>>2)+i];
+        unsigned j;
+
+        for(j=0; j<4; j++, raw<<=8)
+        {
+            buf[3] = (raw>>24)&0xff;
+            if(i==N-1 && j==3)
+                buf[1] |= 0x08; /* last byte */
+            link_send(d, buf, 4);
+            buf[1] &= ~0x04; /* not first byte */
+        }
+    }
+
+    d->evgreg[0x20>>2] &= ~0x00080000;
+    d->evgreg[0x20>>2] |=  0x00100000; /* complete */
+}
+
 static void
 plx9030_mmio_write(void *opaque, hwaddr addr, uint64_t val,
                  unsigned size)
@@ -246,6 +288,10 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         val &= 0x1ff; /* SW can't set pending bit */
         val |= s->evgreg[addr>>2]&0x200;
         break;
+    case 0x20: /* buffer TX */
+        val &= 0x000707fc;
+        val |= s->evgreg[addr>>2]&0x00180000;
+        break;
     case 0x70: /* sequencer control */
     case 0x74:
         val &= 0x00ff00ff;
@@ -277,6 +323,10 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
             DBGOUT("Sent Sw event %u\n", (unsigned)(val&0xff));
         } else
             WRNOUT("Sw event can't send while pending\n");
+        break;
+    case 0x20: /* buffer TX */
+        if(val&0x00040000)
+            evg_dbuf_send(s);
         break;
     case 0x70: /* sequencer control */
     case 0x74:
