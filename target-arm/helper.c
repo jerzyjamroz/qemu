@@ -5346,18 +5346,23 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     switch (cs->exception_index) {
     case EXCP_UDEF:
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
-        return;
+        env->v7m.exception = ARMV7M_EXCP_USAGE;
+        break;
     case EXCP_SWI:
         /* The PC already points to the next instruction.  */
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_SVC);
-        return;
+        env->v7m.exception = ARMV7M_EXCP_SVC;
+        break;
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
-        /* TODO: if we implemented the MPU registers, this is where we
-         * should set the MMFAR, etc from exception.fsr and exception.vaddress.
-         */
+        if(env->v7m.exception!=0 && env->exception.vaddress>=0xfffffff0) {
+            /* this isn't a real fault, but rather a result of return from interrupt */
+            do_v7m_exception_exit(env);
+            return;
+        }
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
-        return;
+        env->v7m.exception = ARMV7M_EXCP_MEM;
+        break;
     case EXCP_BKPT:
         if (semihosting_enabled()) {
             int nr;
@@ -5407,6 +5412,12 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     addr = ldl_phys(cs->as, env->v7m.vecbase + env->v7m.exception * 4);
     env->regs[15] = addr & 0xfffffffe;
     env->thumb = addr & 1;
+    if(!env->thumb) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "M profile interrupt handler with misaligned "
+                      "PC is UNPREDICTABLE\n");
+        env->thumb = 1;
+    }
 }
 
 /* Function used to synchronize QEMU's AArch64 register set with AArch32
@@ -6681,6 +6692,10 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
 
     *phys_ptr = address;
     *prot = 0;
+
+    /* ensure exception returns take precidence */
+    if(env->v7m.exception!=0 && env->exception.vaddress>=0xfffffff0)
+        return true;
 
     if (regime_translation_disabled(env, mmu_idx)) { /* MPU disabled */
         get_phys_addr_pmsav7_default(env, mmu_idx, address, prot);
