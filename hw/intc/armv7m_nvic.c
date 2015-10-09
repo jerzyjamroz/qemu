@@ -245,12 +245,11 @@ static uint32_t nvic_readl(nvic_state *s, uint32_t offset)
         if (s->gic.irq_state[ARMV7M_EXCP_USAGE].enabled) val |= (1 << 18);
         return val;
     case 0xd28: /* Configurable Fault Status.  */
-        /* TODO: Implement Fault Status.  */
-        qemu_log_mask(LOG_UNIMP, "Configurable Fault Status unimplemented\n");
-        return 0;
+        return ARM_CPU(current_cpu)->pmsav7_cfsr;
+    case 0xd34: /* MMFAR MemManage Fault Address */
+        return ARM_CPU(current_cpu)->pmsav7_mmfar;
     case 0xd2c: /* Hard Fault Status.  */
     case 0xd30: /* Debug Fault Status.  */
-    case 0xd34: /* Mem Manage Address.  */
     case 0xd38: /* Bus Fault Address.  */
     case 0xd3c: /* Aux Fault Status.  */
         /* TODO: Implement fault status registers.  */
@@ -283,6 +282,54 @@ static uint32_t nvic_readl(nvic_state *s, uint32_t offset)
     case 0xd70: /* ISAR4.  */
         return 0x01310102;
     /* TODO: Implement debug registers.  */
+    case 0xd90: /* MPU_TYPE */
+        cpu = ARM_CPU(current_cpu);
+        return cpu->has_mpu ? (cpu->pmsav7_dregion<<8) : 0;
+        break;
+    case 0xd94: /* MPU_CTRL */
+        val = 0;
+        cpu = ARM_CPU(current_cpu);
+        if(cpu->env.cp15.sctlr_el[0] & SCTLR_M)
+            val |= 3; /* ENABLE and HFNMIENA */
+        if(cpu->env.cp15.sctlr_el[0] & SCTLR_BR)
+            val |= 4; /* PRIVDEFENA */
+        return val;
+    case 0xd98: /* MPU_RNR */
+        return ARM_CPU(current_cpu)->env.cp15.c6_rgnr;
+    case 0xd9c: /* MPU_RBAR */
+    case 0xda4: /* MPU_RBAR_A1 */
+    case 0xdaC: /* MPU_RBAR_A2 */
+    case 0xdb4: /* MPU_RBAR_A3 */
+    {
+        uint32_t range;
+        cpu = ARM_CPU(current_cpu);
+        if(offset==0xd9c)
+            range = cpu->env.cp15.c6_rgnr;
+        else
+            range = (offset-0xda4)/8;
+
+        if(range>=cpu->pmsav7_dregion) return 0;
+
+        return (cpu->env.pmsav7.drbar[range]&(0x1f)) | (range&0xf);
+    }
+    case 0xda0: /* MPU_RASR */
+    case 0xda8: /* MPU_RASR_A1 */
+    case 0xdb0: /* MPU_RASR_A2 */
+    case 0xdb8: /* MPU_RASR_A3 */
+    {
+        uint32_t range;
+        cpu = ARM_CPU(current_cpu);
+
+        if(offset==0xda0)
+            range = cpu->env.cp15.c6_rgnr;
+        else
+            range = (offset-0xda8)/8;
+
+        if(range>=cpu->pmsav7_dregion) return 0;
+
+        return ((cpu->env.pmsav7.dracr[range]&0xffff)<<16)
+                | (cpu->env.pmsav7.drsr[range]&0xffff);
+    }
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "NVIC: Bad read offset 0x%x\n", offset);
         return 0;
@@ -376,13 +423,109 @@ static void nvic_writel(nvic_state *s, uint32_t offset, uint32_t value)
         s->gic.irq_state[ARMV7M_EXCP_USAGE].enabled = (value & (1 << 18)) != 0;
         break;
     case 0xd28: /* Configurable Fault Status.  */
+    case 0xd34: /* Mem Manage Address.  */
+        return;
     case 0xd2c: /* Hard Fault Status.  */
     case 0xd30: /* Debug Fault Status.  */
-    case 0xd34: /* Mem Manage Address.  */
     case 0xd38: /* Bus Fault Address.  */
     case 0xd3c: /* Aux Fault Status.  */
         qemu_log_mask(LOG_UNIMP,
                       "NVIC: fault status registers unimplemented\n");
+        break;
+    case 0xd90: /* MPU_TYPE (0xe000ed90) */
+        return; /* RO */
+    case 0xd94: /* MPU_CTRL */
+    {
+        unsigned q;
+        uint32_t tset=0, tclear=0;
+        if(value&1) {
+            tset |= SCTLR_M;
+        } else {
+            tclear |= SCTLR_M;
+        }
+        if(!(value&2)) {
+            /* The M series MPU is almost functionally the same
+             * as the R series MPU, so we translate to the R series
+             * register format.
+             *
+             * One difference is that the R series MPU doesn't implement
+             * HFNMIENA (bypass MPU in some exception handlers).
+             */
+            qemu_log_mask(LOG_UNIMP, "M profile does not implement clearing of HFNMIENA bit in MPU_CTRL\n");
+        }
+        if(value&4) {
+            tset |= SCTLR_BR;
+        } else {
+            tclear |= SCTLR_BR;
+        }
+        cpu = ARM_CPU(current_cpu);
+        /* TODO, which sctlr(s) really need to be set? */
+        for(q=0; q<4; q++) {
+            cpu->env.cp15.sctlr_el[q] |= tset;
+            cpu->env.cp15.sctlr_el[q] &= ~tclear;
+        }
+        tlb_flush(CPU(cpu), 1);
+    }
+        break;
+    case 0xd98: /* MPU_RNR */
+        cpu = ARM_CPU(current_cpu);
+        if(value>=cpu->pmsav7_dregion) {
+            qemu_log_mask(LOG_GUEST_ERROR, "MPU region out of range %u/%u\n",
+                          (unsigned)value, (unsigned)cpu->pmsav7_dregion);
+        } else {
+            cpu->env.cp15.c6_rgnr = value;
+        }
+        tlb_flush(CPU(cpu), 1); /* necessary? */
+        break;
+    case 0xd9c: /* MPU_RBAR */
+    case 0xda4: /* MPU_RBAR_A1 */
+    case 0xdac: /* MPU_RBAR_A2 */
+    case 0xdb4: /* MPU_RBAR_A3 */
+    {
+        uint32_t range;
+        uint32_t base = value;
+        cpu = ARM_CPU(current_cpu);
+
+        if(offset==0xd9c)
+            range = cpu->env.cp15.c6_rgnr;
+        else
+            range = (offset-0xda4)/8;
+
+        if(value&(1<<4)) {
+            range = value&0xf;
+
+            if(range>=cpu->pmsav7_dregion) {
+                qemu_log_mask(LOG_GUEST_ERROR, "MPU region out of range %u/%u\n",
+                              (unsigned)range, (unsigned)cpu->pmsav7_dregion);
+                return;
+            }
+            cpu->env.cp15.c6_rgnr = range;
+            base &= ~0x1f;
+
+        } else if(range>=cpu->pmsav7_dregion)
+            return;
+
+        cpu->env.pmsav7.drbar[range] = base&~0x3;
+    }
+        tlb_flush(CPU(cpu), 1);
+        break;
+    case 0xda0: /* MPU_RASR */
+    case 0xda8: /* MPU_RASR_A1 */
+    case 0xdb0: /* MPU_RASR_A2 */
+    case 0xdb8: /* MPU_RASR_A3 */
+    {
+        uint32_t range;
+        cpu = ARM_CPU(current_cpu);
+
+        if(offset==0xda0)
+            range = cpu->env.cp15.c6_rgnr;
+        else
+            range = (offset-0xda8)/8;
+
+        cpu->env.pmsav7.drsr[range] = value&0xff3f;
+        cpu->env.pmsav7.dracr[range] = (value>>16)&0x173f;
+    }
+        tlb_flush(CPU(cpu), 1);
         break;
     case 0xf00: /* Software Triggered Interrupt Register */
         if ((value & 0x1ff) < s->num_irq) {

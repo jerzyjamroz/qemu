@@ -5357,11 +5357,15 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     case EXCP_DATA_ABORT:
         if(env->v7m.exception!=0 && env->exception.vaddress>=0xfffffff0) {
             /* this isn't a real fault, but rather a result of return from interrupt */
+            cpu->pmsav7_mmfar = 0;
+            cpu->pmsav7_cfsr = 0;
             do_v7m_exception_exit(env);
             return;
         }
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
         env->v7m.exception = ARMV7M_EXCP_MEM;
+        cpu->pmsav7_mmfar = env->exception.vaddress;
+        cpu->pmsav7_cfsr = (1<<1)|(1<<7);
         break;
     case EXCP_BKPT:
         if (semihosting_enabled()) {
@@ -5382,6 +5386,9 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         env->v7m.exception = armv7m_nvic_acknowledge_irq(env->nvic);
         break;
     case EXCP_EXCEPTION_EXIT:
+
+        cpu->pmsav7_mmfar = 0;
+        cpu->pmsav7_cfsr = 0;
         do_v7m_exception_exit(env);
         return;
     default:

@@ -107,6 +107,10 @@ typedef struct ARMCPU {
     bool has_mpu;
     /* PMSAv7 MPU number of supported regions */
     uint32_t pmsav7_dregion;
+    /* PMASv7 Fault status */
+    uint32_t pmsav7_cfsr;
+    /* PMASv7 Address of fault */
+    uint32_t pmsav7_mmfar;
 
     /* PSCI conduit used to invoke PSCI methods
      * 0 - disabled, 1 - smc, 2 - hvc

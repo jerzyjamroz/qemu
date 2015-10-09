@@ -1255,6 +1255,17 @@ static void stellaris_init(const char *kernel_filename, const char *cpu_model,
     qdev_connect_gpio_out_named(nvic, "SYSRESETREQ", 0,
                                 qemu_allocate_irq(&do_sys_reset, NULL, 0));
 
+    {
+        /* hack to change the number of MPU regions.
+         * Less of a hack than messing with cpu_model string.
+         * Safe as long as the number is being reduced.
+         */
+        ARMCPU *cpu = ARM_CPU(qemu_get_cpu(0));
+        assert(cpu->pmsav7_dregion>=8);
+        cpu->pmsav7_dregion = 8;
+    }
+
+
     if (board->dc1 & (1 << 16)) {
         dev = sysbus_create_varargs(TYPE_STELLARIS_ADC, 0x40038000,
                                     qdev_get_gpio_in(nvic, 14),

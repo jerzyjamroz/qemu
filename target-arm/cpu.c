@@ -516,6 +516,12 @@ static Property arm_cpu_has_mpu_property =
 static Property arm_cpu_pmsav7_dregion_property =
             DEFINE_PROP_UINT32("pmsav7-dregion", ARMCPU, pmsav7_dregion, 16);
 
+static Property arm_cpu_pmsav7_cfsr_property =
+            DEFINE_PROP_UINT32("pmsav7-cfsr", ARMCPU, pmsav7_cfsr, 0);
+
+static Property arm_cpu_pmsav7_mmfar_property =
+            DEFINE_PROP_UINT32("pmsav7-mmfar", ARMCPU, pmsav7_mmfar, 0);
+
 static void arm_cpu_post_init(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
@@ -550,6 +556,12 @@ static void arm_cpu_post_init(Object *obj)
         if (arm_feature(&cpu->env, ARM_FEATURE_V7)) {
             qdev_property_add_static(DEVICE(obj),
                                      &arm_cpu_pmsav7_dregion_property,
+                                     &error_abort);
+            qdev_property_add_static(DEVICE(obj),
+                                     &arm_cpu_pmsav7_cfsr_property,
+                                     &error_abort);
+            qdev_property_add_static(DEVICE(obj),
+                                     &arm_cpu_pmsav7_mmfar_property,
                                      &error_abort);
         }
     }
@@ -889,6 +901,7 @@ static void cortex_m3_initfn(Object *obj)
     ARMCPU *cpu = ARM_CPU(obj);
     set_feature(&cpu->env, ARM_FEATURE_V7);
     set_feature(&cpu->env, ARM_FEATURE_M);
+    set_feature(&cpu->env, ARM_FEATURE_MPU);
     cpu->midr = 0x410fc231;
 }
 
@@ -898,6 +911,7 @@ static void cortex_m4_initfn(Object *obj)
 
     set_feature(&cpu->env, ARM_FEATURE_V7);
     set_feature(&cpu->env, ARM_FEATURE_M);
+    set_feature(&cpu->env, ARM_FEATURE_MPU);
     set_feature(&cpu->env, ARM_FEATURE_THUMB_DSP);
     cpu->midr = 0x410fc240; /* r0p0 */
 }
