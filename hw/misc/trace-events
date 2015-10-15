@@ -77,3 +77,13 @@ mos6522_get_next_irq_time(uint16_t latch, int64_t d, int64_t delta) "latch=%d co
 mos6522_set_sr_int(void) "set sr_int"
 mos6522_write(uint64_t addr, uint64_t val) "reg=0x%"PRIx64 " val=0x%"PRIx64
 mos6522_read(uint64_t addr, unsigned val) "reg=0x%"PRIx64 " val=0x%x"
+
+# hw/misc/caen_pico8.c
+pico8_irq(char lvl, char msi) "IRQ lvl=%c msi=%c"
+pico8_dma(uint32_t base, uint32_t count, unsigned irq, unsigned in, unsigned out) "Run %08" PRIx32 " count=%08" PRIx32 "irq=%u in=%u out=%u"
+pico8_reg_read(hwaddr addr, uint32_t val) "" TARGET_FMT_plx " -> %08" PRIx32
+pico8_reg_write(hwaddr addr, uint64_t val) "" TARGET_FMT_plx " -> %08" PRIx64
+pico8_ddr_read(const char *msg, hwaddr addr, uint32_t val, unsigned size) "%s " TARGET_FMT_plx " <- %08" PRIx32 " size=%u"
+pico8_ddr_write(const char *msg, hwaddr addr, uint32_t val, unsigned size) "%s " TARGET_FMT_plx " <- %08" PRIx32 " size=%u"
+pico8_ack(char junk) "ACK%c"
+pico8_missed_ack(char junk) "Missed ACK%c"
