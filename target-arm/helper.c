@@ -5578,17 +5578,66 @@ static void switch_v7m_sp(CPUARMState *env, bool process)
 
 static void do_v7m_exception_exit(CPUARMState *env)
 {
+    unsigned ufault = 0;
     uint32_t type;
     uint32_t xpsr;
 
-    type = env->regs[15];
+    if (env->v7m.exception == 0) {
+        hw_error("Return from exception w/o active exception.  Logic error.");
+    }
+
     if (env->v7m.exception != ARMV7M_EXCP_NMI) {
         /* Auto-clear FAULTMASK on return from other than NMI */
         env->daif &= ~PSTATE_F;
     }
-    if (env->v7m.exception != 0) {
-        armv7m_nvic_complete_irq(env->nvic, env->v7m.exception);
+
+    if (armv7m_nvic_complete_irq(env->nvic, env->v7m.exception)) {
+        qemu_log_mask(LOG_GUEST_ERROR, "Requesting return from exception "
+                      "from inactive exception %d\n",
+                      env->v7m.exception);
+        ufault = 1;
     }
+    env->v7m.exception = -42; /* spoil, will be unstacked below */
+    env->v7m.exception_prio = armv7m_nvic_get_active_prio(env->nvic);
+
+    type = env->regs[15] & 0xf;
+    /* QEMU seems to clear the LSB at some point. */
+    type |= 1;
+
+    switch (type) {
+    case 0x1: /* Return to Handler mode */
+        if (env->v7m.exception_prio == 0x100) {
+            qemu_log_mask(LOG_GUEST_ERROR, "Requesting return from exception "
+                          "to Handler mode not allowed at base level of "
+                          "activation");
+            ufault = 1;
+        }
+        break;
+    case 0x9: /* Return to Thread mode w/ Main stack */
+    case 0xd: /* Return to Thread mode w/ Process stack */
+        if ((env->v7m.exception_prio != 0x100)
+                && !(env->v7m.ccr & CCR_NONBASETHRDENA))
+        {
+            /* Attempt to return to Thread mode
+             * from nested handler while NONBASETHRDENA not set.
+             */
+            qemu_log_mask(LOG_GUEST_ERROR, "Nested exception return to %d w/"
+                          " Thread mode while NONBASETHRDENA not set\n",
+                          env->v7m.exception);
+            ufault = 1;
+        }
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "Exception return w/ reserved code"
+                                       " %02x\n", (unsigned)type);
+        ufault = 1;
+    }
+
+    /* TODO? if ufault==1 ARM calls for entering exception handler
+     * directly w/o popping stack.
+     * We pop anyway since the active UsageFault will push on entry
+     * which should happen before execution resumes?
+     */
 
     /* Switch to the target stack.  */
     switch_v7m_sp(env, (type & 4) != 0);
@@ -5612,14 +5661,49 @@ static void do_v7m_exception_exit(CPUARMState *env)
     }
     xpsr = v7m_pop(env);
     xpsr_write(env, xpsr, 0xfffffdff);
+
+    assert(env->v7m.exception != -42);
+
     /* Undo stack alignment.  */
     if (xpsr & 0x200)
         env->regs[13] |= 4;
-    /* ??? The exception return type specifies Thread/Handler mode.  However
-       this is also implied by the xPSR value. Not sure what to do
-       if there is a mismatch.  */
-    /* ??? Likewise for mismatches between the CONTROL register and the stack
-       pointer.  */
+
+    if (!ufault) {
+        /* consistency check between NVIC and guest stack */
+        if (env->v7m.exception == 0 && env->v7m.exception_prio != 0x100) {
+            ufault = 1;
+            qemu_log_mask(LOG_GUEST_ERROR, "Can't Unstacked to thread mode "
+                          "with active exception\n");
+            env->v7m.exception_prio = 0x100;
+
+        } else if (env->v7m.exception != 0 &&
+                   !armv7m_nvic_is_active(env->nvic, env->v7m.exception))
+        {
+            ufault = 1;
+            qemu_log_mask(LOG_GUEST_ERROR, "Unstacked exception %d is not "
+                          "active\n", env->v7m.exception);
+            /* just clear, will be recalculated when UsageFault is pended */
+            env->v7m.exception_prio = 0x100;
+            env->v7m.exception = 0;
+        } else  if (env->v7m.exception != 0
+                    && env->v7m.exception_prio == 0x100) {
+            hw_error("logic error at exception exit\n");
+        }
+        /* ARM calls for PushStack() here, which should happen
+         * went we return with a pending exception
+         */
+    }
+
+    if (ufault) {
+        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        env->v7m.cfsr |= 1<<18; /* INVPC */
+    }
+
+    /* Ensure that priority is consistent.  Clear for Thread mode
+     * and set for Handler mode
+     */
+    assert((env->v7m.exception == 0 && env->v7m.exception_prio > 0xff)
+           || (env->v7m.exception != 0 && env->v7m.exception_prio <= 0xff));
 }
 
 static

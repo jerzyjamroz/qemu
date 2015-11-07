@@ -399,7 +399,7 @@ void armv7m_nvic_acknowledge_irq(void *opaque)
     assert(env->v7m.exception > 0); /* spurious exception? */
 }
 
-void armv7m_nvic_complete_irq(void *opaque, int irq)
+bool armv7m_nvic_complete_irq(void *opaque, int irq)
 {
     NVICState *s = (NVICState *)opaque;
     VecInfo *vec;
@@ -409,12 +409,17 @@ void armv7m_nvic_complete_irq(void *opaque, int irq)
 
     vec = &s->vectors[irq];
 
+    if (!vec->active) {
+        return true;
+    }
+
     vec->active = 0;
     vec->pending = vec->level;
     assert(!vec->level || irq >= 16);
 
     nvic_irq_update(s);
     DPRINTF(0, "EOI %d\n", irq);
+    return false;
 }
 
 /* Only called for external interrupt (vector>=16) */
