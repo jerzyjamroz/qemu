@@ -171,6 +171,9 @@ void qtest_irq_intercept_in(QTestState *s, const char *string);
  */
 void qtest_irq_intercept_out(QTestState *s, const char *string);
 
+void qtest_irq_intercept_out_named(QTestState *s, const char *qom_path,
+                                   const char *name);
+
 /**
  * qtest_outb:
  * @s: #QTestState instance to operate on.

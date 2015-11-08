@@ -295,8 +295,9 @@ static void qtest_process_command(CharDriverState *chr, gchar **words)
         }
 
         QLIST_FOREACH(ngl, &dev->gpios, node) {
-            /* We don't support intercept of named GPIOs yet */
-            if (ngl->name) {
+            if ((ngl->name && words[2] == NULL)
+                    || (!ngl->name && words[2] != NULL)
+                    || strcmp(ngl->name, words[2]) != 0) {
                 continue;
             }
             if (words[0][14] == 'o') {
