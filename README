@@ -1,0 +1,4 @@
+~/projects/qemu/build/ppc-softmmu/qemu-system-ppc \
+-M mvme3100-1152 -m 256 -no-reboot \
+-monitor stdio -vga none -d unimp,guest_errors,int \
+-kernel bin/rtems.boot -append testing -s -S
