@@ -7545,7 +7545,7 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
 
             if (base & rmask) {
                 qemu_log_mask(LOG_GUEST_ERROR, "DRBAR %" PRIx32 " misaligned "
-                              "to DRSR region size, mask = %" PRIx32,
+                              "to DRSR region size, mask = %" PRIx32 "\n",
                               base, rmask);
                 continue;
             }
@@ -7583,9 +7583,9 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
                 }
             }
             if (rsize < TARGET_PAGE_BITS) {
-                qemu_log_mask(LOG_UNIMP, "No support for MPU (sub)region"
+                qemu_log_mask(LOG_UNIMP, "No support for MPU[%u] (sub)region "
                               "alignment of %" PRIu32 " bits. Minimum is %d\n",
-                              rsize, TARGET_PAGE_BITS);
+                              n, rsize, TARGET_PAGE_BITS);
                 continue;
             }
             if (srdis) {
@@ -7599,11 +7599,14 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
                 (is_user || !(regime_sctlr(env, mmu_idx) & SCTLR_BR))) {
                 /* background fault */
                 *fsr = 0;
+
+                qemu_log_mask(CPU_LOG_MMU, "Miss MPU\n");
                 return true;
             }
             get_phys_addr_pmsav7_default(env, mmu_idx, address, prot);
         } else { /* a MPU hit! */
             uint32_t ap = extract32(env->pmsav7.dracr[n], 8, 3);
+            qemu_log_mask(CPU_LOG_MMU, "Hit MPU %u AP %08x\n", n, (unsigned)ap);
 
             if (is_user) { /* User mode AP bit decoding */
                 switch (ap) {
@@ -7817,9 +7820,15 @@ static bool get_phys_addr(CPUARMState *env, target_ulong address,
      */
     if (arm_feature(env, ARM_FEATURE_MPU) &&
         arm_feature(env, ARM_FEATURE_V7)) {
+        bool ret;
         *page_size = TARGET_PAGE_SIZE;
-        return get_phys_addr_pmsav7(env, address, access_type, mmu_idx,
-                                    phys_ptr, prot, fsr);
+        ret = get_phys_addr_pmsav7(env, address, access_type, mmu_idx,
+                                   phys_ptr, prot, fsr);
+        qemu_log_mask(CPU_LOG_MMU, "TLB %08x mmu_idx=%u AC %u -> AC %u %s\n",
+                      (unsigned)address, mmu_idx, 1<<access_type, *prot,
+                      ret ? "Miss" : "Hit");
+
+        return ret;
     }
 
     if (regime_translation_disabled(env, mmu_idx)) {
