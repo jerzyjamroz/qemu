@@ -403,6 +403,9 @@ typedef struct CPUARMState {
         uint32_t mmfar; /* MemManage Fault Address */
         uint32_t bfar; /* BusFault Address */
         int exception;
+        int exception_prio;
+        unsigned pending;
+        int pending_prio;
     } v7m;
 
     /* Information associated with an exception about to be taken:
