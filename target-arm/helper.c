@@ -7541,6 +7541,15 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
     *phys_ptr = address;
     *prot = 0;
 
+    /* Magic exception codes returns always pass through the MPU
+     * to be trapped later in arm_v7m_unassigned_access()
+     */
+    if (IS_M(env) && env->v7m.exception != 0 && address >= 0xfffffff0) {
+        *prot = PAGE_EXEC;
+        *fsr = 0;
+        return false;
+    }
+
     if (regime_translation_disabled(env, mmu_idx)) { /* MPU disabled */
         get_phys_addr_pmsav7_default(env, mmu_idx, address, prot);
     } else { /* MPU enabled */
