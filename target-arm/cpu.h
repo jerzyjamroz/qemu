@@ -396,6 +396,7 @@ typedef struct CPUARMState {
         uint32_t other_sp;
         uint32_t vecbase;
         uint32_t basepri;
+        uint32_t prigroup;
         uint32_t control;
         uint32_t ccr; /* Configuration and Control */
         uint32_t cfsr; /* Configurable Fault Status */
@@ -1111,6 +1112,7 @@ uint32_t arm_phys_excp_target_el(CPUState *cs, uint32_t excp_idx,
                                  uint32_t cur_el, bool secure);
 
 /* Interface between CPU and Interrupt controller.  */
+int armv7m_excp_running_prio(ARMCPU *cpu);
 void armv7m_nvic_set_pending(void *opaque, int irq);
 int armv7m_nvic_acknowledge_irq(void *opaque);
 void armv7m_nvic_complete_irq(void *opaque, int irq);

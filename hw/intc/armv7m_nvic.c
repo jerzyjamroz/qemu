@@ -118,6 +118,28 @@ static void systick_reset(nvic_state *s)
     timer_del(s->systick.timer);
 }
 
+/* @returns the active (running) exception priority.
+ *    only a higher (numerically lower) priority can preempt.
+ */
+int armv7m_excp_running_prio(ARMCPU *cpu)
+{
+    CPUARMState *env = &cpu->env;
+    int running;
+
+    if (env->daif & PSTATE_F) { /* FAULTMASK */
+        running = -1;
+    } else if (env->daif & PSTATE_I) { /* PRIMASK */
+        running = 0;
+    } else if (env->v7m.basepri > 0) {
+        /* BASEPRI==1 -> masks [1,255] (not same as PRIMASK==1) */
+        running = env->v7m.basepri;
+    } else {
+        running = 0x100; /* lower than any possible priority */
+    }
+    /* consider priority of active handler */
+    return MIN(running, env->v7m.exception_prio);
+}
+
 /* The external routines use the hardware vector numbering, ie. the first
    IRQ is #16.  The internal GIC routines use #32 as the first IRQ.  */
 void armv7m_nvic_set_pending(void *opaque, int irq)

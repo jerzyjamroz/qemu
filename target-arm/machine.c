@@ -100,6 +100,7 @@ static const VMStateDescription vmstate_m = {
         VMSTATE_UINT32(env.v7m.other_sp, ARMCPU),
         VMSTATE_UINT32(env.v7m.vecbase, ARMCPU),
         VMSTATE_UINT32(env.v7m.basepri, ARMCPU),
+        VMSTATE_UINT32(env.v7m.prigroup, ARMCPU),
         VMSTATE_UINT32(env.v7m.control, ARMCPU),
         VMSTATE_UINT32(env.v7m.ccr, ARMCPU),
         VMSTATE_UINT32(env.v7m.cfsr, ARMCPU),
