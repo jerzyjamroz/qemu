@@ -151,6 +151,8 @@ void set_prio(NVICState *s, unsigned irq, uint8_t prio)
     assert(irq > 3); /* only use for configurable prios */
     assert(irq < NVIC_MAX_VECTORS);
 
+    prio &= s->cpu->v7m_priority_mask;
+
     s->vectors[irq].raw_prio = prio;
     s->vectors[irq].prio_group = prio & (~submask);
     s->vectors[irq].prio_sub = irq + (prio & submask) * NVIC_MAX_VECTORS;

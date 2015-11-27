@@ -537,6 +537,9 @@ static Property arm_cpu_has_mpu_property =
 static Property arm_cpu_pmsav7_dregion_property =
             DEFINE_PROP_UINT32("pmsav7-dregion", ARMCPU, pmsav7_dregion, 16);
 
+static Property armv7m_priority_mask_property =
+        DEFINE_PROP_UINT8("priority-mask", ARMCPU, v7m_priority_mask, 0xff);
+
 static void arm_cpu_post_init(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
@@ -584,6 +587,10 @@ static void arm_cpu_post_init(Object *obj)
         }
     }
 
+    if (IS_M(&cpu->env) && arm_feature(&cpu->env, ARM_FEATURE_V7)) {
+        qdev_property_add_static(DEVICE(obj), &armv7m_priority_mask_property,
+                                 &error_abort);
+    }
 }
 
 static void arm_cpu_finalizefn(Object *obj)
