@@ -176,7 +176,10 @@ static void arm_cpu_reset(CPUState *s)
 
         env->v7m.exception_prio = env->v7m.pending_prio = 0x100;
 
+        env->v7m.ccr = 1<<9; /* STKALIGN */
+
         env->daif &= ~(PSTATE_I|PSTATE_F);
+        env->ZF = 1;
         rom = rom_ptr(0);
         if (rom) {
             /* Address zero is covered by ROM which hasn't yet been
@@ -195,6 +198,7 @@ static void arm_cpu_reset(CPUState *s)
         }
 
         env->regs[13] = initial_msp & 0xFFFFFFFC;
+        env->regs[14] = 0xffffffff;
         env->regs[15] = initial_pc & ~1;
         env->thumb = initial_pc & 1;
     }
