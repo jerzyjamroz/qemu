@@ -174,6 +174,8 @@ static void arm_cpu_reset(CPUState *s)
         uint32_t initial_pc; /* Loaded from 0x4 */
         uint8_t *rom;
 
+        env->v7m.exception_prio = env->v7m.pending_prio = 0x100;
+
         env->daif &= ~PSTATE_I;
         rom = rom_ptr(0);
         if (rom) {
