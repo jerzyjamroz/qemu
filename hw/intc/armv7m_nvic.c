@@ -598,8 +598,67 @@ static uint32_t nvic_readl(NVICState *s, uint32_t offset)
     case 0xd70: /* ISAR4.  */
         return 0x01310102;
     /* TODO: Implement debug registers.  */
+    case 0xd90: /* MPU_TYPE */
+        return cpu->has_mpu ? (cpu->pmsav7_dregion<<8) : 0;
+        break;
+    case 0xd94: /* MPU_CTRL */
+        val = 0;
+        /* We only use sctlr_el[1] since v7m has only two ELs unpriv. (0)
+         * and priv. (1).  The "controlling" EL is always priv.
+         */
+        if (cpu->env.cp15.sctlr_el[1] & SCTLR_M) {
+            val |= 1; /* ENABLE */
+        }
+        if (cpu->env.v7m.mpu_hfnmiena) {
+            val |= 2; /* HFNMIENA */
+        }
+        if (cpu->env.cp15.sctlr_el[1] & SCTLR_BR) {
+            val |= 4; /* PRIVDEFENA */
+        }
+        return val;
+    case 0xd98: /* MPU_RNR */
+        return cpu->env.cp15.c6_rgnr;
+    case 0xd9c: /* MPU_RBAR */
+    case 0xda4: /* MPU_RBAR_A1 */
+    case 0xdac: /* MPU_RBAR_A2 */
+    case 0xdb4: /* MPU_RBAR_A3 */
+    {
+        uint32_t range;
+        if (offset == 0xd9c) {
+            range = cpu->env.cp15.c6_rgnr;
+        } else {
+            range = (offset - 0xda4)/8;
+        }
+
+        if (range >= cpu->pmsav7_dregion) {
+            return 0;
+        } else {
+            return (cpu->env.pmsav7.drbar[range] & (0x1f)) | (range & 0xf);
+        }
+    }
+    case 0xda0: /* MPU_RASR */
+    case 0xda8: /* MPU_RASR_A1 */
+    case 0xdb0: /* MPU_RASR_A2 */
+    case 0xdb8: /* MPU_RASR_A3 */
+    {
+        uint32_t range;
+
+        if (offset == 0xda0) {
+            range = cpu->env.cp15.c6_rgnr;
+        } else {
+            range = (offset - 0xda8)/8;
+        }
+
+        if (range >= cpu->pmsav7_dregion) {
+            return 0;
+        } else {
+            return ((cpu->env.pmsav7.dracr[range] & 0xffff)<<16)
+                    | (cpu->env.pmsav7.drsr[range] & 0xffff);
+        }
+    }
     default:
-        qemu_log_mask(LOG_GUEST_ERROR, "NVIC: Bad read offset 0x%x\n", offset);
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "NVIC: Bad read offset 0x%x\n", offset);
         return 0;
     }
 }
@@ -739,11 +798,93 @@ static void nvic_writel(NVICState *s, uint32_t offset, uint32_t value)
         qemu_log_mask(LOG_UNIMP,
                       "NVIC: Aux fault status registers unimplemented\n");
         break;
+    case 0xd90: /* MPU_TYPE (0xe000ed90) */
+        return; /* RO */
+    case 0xd94: /* MPU_CTRL */
+    {
+        if ((value & 3) == 2) {
+            qemu_log_mask(LOG_GUEST_ERROR, "MPU_CTRL: HFNMIENA and !ENABLE is "
+                          "UNPREDICTABLE\n");
+            /* we choice to ignore HFNMIENA when the MPU
+             * is not enabled.
+             */
+            value &= ~2;
+        }
+        if (value & 1) {
+            cpu->env.cp15.sctlr_el[1] |= SCTLR_M;
+        } else {
+            cpu->env.cp15.sctlr_el[1] &= ~SCTLR_M;
+        }
+        cpu->env.v7m.mpu_hfnmiena = !!(value & 2);
+        if (value & 4) {
+            cpu->env.cp15.sctlr_el[1] |= SCTLR_BR;
+        } else {
+            cpu->env.cp15.sctlr_el[1] &= ~SCTLR_BR;
+        }
+        tlb_flush(CPU(cpu), 1);
+    }
+        break;
+    case 0xd98: /* MPU_RNR */
+        if (value >= cpu->pmsav7_dregion) {
+            qemu_log_mask(LOG_GUEST_ERROR, "MPU region out of range %u/%u\n",
+                          (unsigned)value, (unsigned)cpu->pmsav7_dregion);
+        } else {
+            cpu->env.cp15.c6_rgnr = value;
+            DPRINTF(0, "MPU -> RGNR = %u\n", (unsigned)value);
+        }
+        tlb_flush(CPU(cpu), 1); /* necessary? */
+        break;
+    case 0xd9c: /* MPU_RBAR */
+    case 0xda4: /* MPU_RBAR_A1 */
+    case 0xdac: /* MPU_RBAR_A2 */
+    case 0xdb4: /* MPU_RBAR_A3 */
+    {
+        uint32_t range = cpu->env.cp15.c6_rgnr;
+        uint32_t base = value;
+
+        if (value & (1<<4)) {
+            range = value & 0xf;
+
+            if (range >= cpu->pmsav7_dregion) {
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "MPU region out of range %u/%u\n",
+                              (unsigned)range,
+                              (unsigned)cpu->pmsav7_dregion);
+                return;
+            }
+            cpu->env.cp15.c6_rgnr = range;
+            base &= ~0x1f;
+
+        } else if (range >= cpu->pmsav7_dregion) {
+            return;
+        }
+
+        cpu->env.pmsav7.drbar[range] = base & ~0x3;
+        DPRINTF(0, "MPU -> DRBAR[%u] = %08x\n", range,
+                cpu->env.pmsav7.drbar[range]);
+    }
+        tlb_flush(CPU(cpu), 1);
+        break;
+    case 0xda0: /* MPU_RASR */
+    case 0xda8: /* MPU_RASR_A1 */
+    case 0xdb0: /* MPU_RASR_A2 */
+    case 0xdb8: /* MPU_RASR_A3 */
+    {
+        unsigned range = cpu->env.cp15.c6_rgnr;
+
+        cpu->env.pmsav7.drsr[range] = value & 0xff3f;
+        cpu->env.pmsav7.dracr[range] = (value>>16) & 0x173f;
+        DPRINTF(0, "MPU -> DRSR[%u] = %08x DRACR[%u] = %08x\n",
+                range, cpu->env.pmsav7.drsr[range],
+                range, cpu->env.pmsav7.dracr[range]);
+    }
+        tlb_flush(CPU(cpu), 1);
+        break;
     case 0xf00: /* Software Triggered Interrupt Register */
         /* STIR write allowed if privlaged or USERSETMPEND set */
         if ((arm_current_el(&cpu->env) || (cpu->env.v7m.ccr & CCR_USERSETMPEND))
             && ((value & 0x1ff) < NVIC_MAX_IRQ)) {
-            armv7m_nvic_set_pending(s, (value&0x1ff)+16);
+            armv7m_nvic_set_pending(s, (value & 0x1ff)+16);
         }
         break;
     default:
@@ -855,7 +996,7 @@ static void nvic_sysreg_write(void *opaque, hwaddr addr,
 
         DPRINTF(0, "IRQ %sable ", setval ? "en" : "dis");
         for (i = 0, end = size*8; i < end && offset+i < s->num_irq; i++) {
-            if (value&(1<<i)) {
+            if (value & (1<<i)) {
                 DPRINTFx(0, "%u, ", offset+i);
                 s->vectors[offset+i].enabled = setval;
             }
@@ -874,7 +1015,7 @@ static void nvic_sysreg_write(void *opaque, hwaddr addr,
         offset = 8*(offset-0x280)+16; /* vector # */
 
         for (i = 0, end = size*8; i < end && offset+i < s->num_irq; i++) {
-            if (value&(1<<i)) {
+            if (value & (1<<i)) {
                 s->vectors[offset+i].pending = setval;
             }
         }
@@ -886,7 +1027,7 @@ static void nvic_sysreg_write(void *opaque, hwaddr addr,
         offset = 8*(offset-0x400)+16; /* vector # */
 
         for (i = 0; i < size; i++) {
-            set_prio(s, offset+i, (value>>(i*8))&0xff);
+            set_prio(s, offset+i, (value>>(i*8)) & 0xff);
         }
         nvic_irq_update(s);
         s->cpu->env.v7m.exception_prio = armv7m_nvic_get_active_prio(s);

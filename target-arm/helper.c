@@ -6471,6 +6471,12 @@ static inline bool regime_translation_disabled(CPUARMState *env,
     if (mmu_idx == ARMMMUIdx_S2NS) {
         return (env->cp15.hcr_el2 & HCR_VM) == 0;
     }
+    if (IS_M(env) && !env->v7m.mpu_hfnmiena &&
+            ((env->v7m.exception > 0 && env->v7m.exception <= 3)
+             || (env->daif & PSTATE_F)))
+    {
+        return 1;
+    }
     return (regime_sctlr(env, mmu_idx) & SCTLR_M) == 0;
 }
 

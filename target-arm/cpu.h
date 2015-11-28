@@ -403,6 +403,7 @@ typedef struct CPUARMState {
         uint32_t hfsr; /* HardFault Status */
         uint32_t mmfar; /* MemManage Fault Address */
         uint32_t bfar; /* BusFault Address */
+        unsigned mpu_hfnmiena; /* MPU_CTRL not mappable into SCTLR */
         int exception;
         int exception_prio;
         unsigned pending;
