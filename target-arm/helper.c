@@ -7598,7 +7598,7 @@ static bool get_phys_addr_pmsav7(CPUARMState *env, uint32_t address,
             if (cpu->pmsav7_dregion &&
                 (is_user || !(regime_sctlr(env, mmu_idx) & SCTLR_BR))) {
                 /* background fault */
-                *fsr = 0;
+                *fsr = 0x00d; /* Permission fault */
 
                 qemu_log_mask(CPU_LOG_MMU, "Miss MPU\n");
                 return true;
