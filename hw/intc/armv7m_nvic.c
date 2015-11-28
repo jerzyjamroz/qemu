@@ -424,21 +424,13 @@ bool armv7m_nvic_complete_irq(void *opaque, int irq)
     return false;
 }
 
-/* Only called for external interrupt (vector>=16) */
 static
-void set_irq_level(void *opaque, int n, int level)
+void nvic_set_level(NVICState *s, int n, int level)
 {
-    NVICState *s = opaque;
     VecInfo *vec;
 
     assert(n >= 0);
-    assert(n < NVIC_MAX_IRQ);
-
-    n += 16;
-
-    if (n >= s->num_irq) {
-        return;
-    }
+    assert(n < NVIC_MAX_VECTORS);
 
     /* The pending status of an external interrupt is
      * latched on rising edge and exception handler return.
@@ -450,11 +442,38 @@ void set_irq_level(void *opaque, int n, int level)
     vec = &s->vectors[n];
     vec->level = level;
     if (level) {
-        DPRINTF(1, "assert IRQ %d\n", n-16);
-        armv7m_nvic_set_pending(s, n-16);
+        DPRINTF(1, "assert vector %d\n", n);
+        armv7m_nvic_set_pending(s, n);
     } else {
-        DPRINTF(2, "deassert IRQ %d\n", n-16);
+        DPRINTF(2, "deassert vector %d\n", n);
     }
+}
+
+/* Only called for external interrupt (vector>=16) */
+static
+void nvic_set_irq_level(void *opaque, int n, int level)
+{
+    NVICState *s = opaque;
+
+    assert(n >= 0);
+    assert(n < NVIC_MAX_IRQ);
+
+    n += 16;
+
+    if (n >= s->num_irq) {
+        return;
+    }
+
+    nvic_set_level(s, n, level);
+}
+
+/* Only called for NMI (vector==2) */
+static
+void nvic_nmi(void *opaque, int n, int level)
+{
+    NVICState *s = opaque;
+
+    nvic_set_level(s, 2, level);
 }
 
 static uint32_t nvic_readl(NVICState *s, uint32_t offset)
@@ -1160,7 +1179,7 @@ static void armv7m_nvic_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    qdev_init_gpio_in(dev, set_irq_level, s->num_irq);
+    qdev_init_gpio_in(dev, nvic_set_irq_level, s->num_irq);
 
     s->num_irq += 16; /* include space for internal exception vectors */
 
@@ -1199,6 +1218,7 @@ static void armv7m_nvic_instance_init(Object *obj)
 
     sysbus_init_irq(sbd, &nvic->excpout);
     qdev_init_gpio_out_named(dev, &nvic->sysresetreq, "SYSRESETREQ", 1);
+    qdev_init_gpio_in_named(dev, nvic_nmi, "NMI", 1);
 }
 
 static void armv7m_nvic_class_init(ObjectClass *klass, void *data)
