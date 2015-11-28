@@ -315,19 +315,15 @@ static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
     CPUClass *cc = CPU_GET_CLASS(cs);
     ARMCPU *cpu = ARM_CPU(cs);
-    CPUARMState *env = &cpu->env;
     bool ret = false;
 
-
-    if (interrupt_request & CPU_INTERRUPT_FIQ
-        && !(env->daif & PSTATE_F)) {
-        cs->exception_index = EXCP_FIQ;
-        cc->do_interrupt(cs);
-        ret = true;
-    }
+    /* ARMv7-M interrupt masking works differently than -A or -R.
+     * There is no FIQ/IRQ distinction.
+     * Instead of masking interrupt sources, the I and F bits
+     * (along with basepri) mask certain exception priority levels.
+     */
     if (interrupt_request & CPU_INTERRUPT_HARD
-        && !(env->daif & PSTATE_I)
-            ) {
+            && (armv7m_excp_running_prio(cpu) > cpu->env.v7m.pending_prio)) {
         cs->exception_index = EXCP_IRQ;
         cc->do_interrupt(cs);
         ret = true;
