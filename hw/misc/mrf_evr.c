@@ -1,5 +1,5 @@
 /*
- * QEMU MRF PCI EVR emulation
+ * QEMU MRF EVR emulation
  *
  * Michael Davisdaver
  * Copyright (c) 2015
@@ -20,58 +20,51 @@
 
 
 #include "hw/hw.h"
-#include "hw/pci/pci.h"
-#include "net/net.h"
-#include "net/checksum.h"
-#include "hw/loader.h"
-#include "sysemu/sysemu.h"
+#include "hw/sysbus.h"
 #include "sysemu/char.h"
-#include "qemu/iov.h"
 
 #define MRF_DEBUG
 
+#define TYPE_MRF_EVR "mrf-evr"
+
 #ifdef MRF_DEBUG
-#define	DBGOUT(fmt, ...) fprintf(stderr, "mrf-evr: %s() " fmt, __func__, ## __VA_ARGS__)
+#define	DBGOUT(fmt, ...) fprintf(stderr, TYPE_MRF_EVR ": %s() " fmt, __func__, ## __VA_ARGS__)
 #else
 #define	DBGOUT(fmt, ...) do {} while (0)
 #endif
 
+#define ERR(mask, fmt, ...)  qemu_log_mask(mask, TYPE_MRF_EVR ": " fmt, ## __VA_ARGS__)
+
 #define NELEM(N) (sizeof(N)/sizeof((N)[0]))
 
-#define TYPE_MRF_EVR_BASE "mrf-evr"
-
 #define MRF_EVR(obj) \
-    OBJECT_CHECK(MRFPCIState, (obj), TYPE_MRF_EVR_BASE)
-
-#define MRF_EVR_DEVICE_CLASS(klass) \
-     OBJECT_CLASS_CHECK(MRFEVRBaseClass, (klass), TYPE_MRF_EVR_BASE)
-#define MRF_EVR_DEVICE_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(MRFEVRBaseClass, (obj), TYPE_MRF_EVR_BASE)
+    OBJECT_CHECK(EVRState, (obj), TYPE_MRF_EVR)
 
 typedef struct {
     uint32_t sec, count;
     uint8_t code;
 } EVRFifoEntry;
 
-typedef struct MRFPCIState {
+typedef struct EVRState {
     /*< private >*/
-    PCIDevice parent_obj;
+    SysBusDevice parent_obj;
 
     CharDriverState *chr; /* event link */
 
-    MemoryRegion plx9030;
     MemoryRegion evr;
 
-    unsigned int extbridge:1; /* 1 - PLX 9030, 0 - integrated */
-    /* plx 9030 */
-    unsigned int evrbe:1;
-    unsigned int pciint:1;
+    qemu_irq irq;
+
     /* evr */
-    unsigned int masterena:1;
-    unsigned int irqactive:1;
-    unsigned int linkup:1;
-    unsigned int linkupprev:1;
-    unsigned int dbuf_ena:1;
+    uint8_t mrftype, fwversion;
+    bool intbridge;
+
+    bool masterena;
+    bool evrbe;
+    bool pciint;
+    bool linkup;
+    bool linkupprev;
+    bool dbuf_ena;
 
     EVRFifoEntry fifo[512];
     unsigned fifo_in, fifo_out; /* buffer pointers */
@@ -83,14 +76,10 @@ typedef struct MRFPCIState {
 
     uint8_t rxbuf[4];
     unsigned rxbuflen;
-} MRFPCIState;
-
-typedef struct MRFPCIBaseClass {
-    PCIDeviceClass parent_class;
-} MRFPCIBaseClass;
+} EVRState;
 
 static
-void mrf_evr_update(MRFPCIState *s)
+void mrf_evr_update(EVRState *s)
 {
     uint32_t rawirq = 0, actirq, ena;
 
@@ -118,69 +107,15 @@ void mrf_evr_update(MRFPCIState *s)
         int level = s->pciint && (ena&0x80000000) && actirq;
         DBGOUT("IRQ %d Flag %08x Act %08x Ena %08x\n", level,
                (unsigned)rawirq, (unsigned)actirq, (unsigned)ena);
-        s->irqactive = !!level;
-        pci_set_irq(&s->parent_obj, !!level);
+        qemu_set_irq(s->irq, !!level);
     }
 }
-
-static void
-plx9030_mmio_write(void *opaque, hwaddr addr, uint64_t val,
-                 unsigned size)
-{
-    MRFPCIState *s = opaque;
-    switch(addr) {
-    case 0x28: /* LAS0BRD */
-        s->evrbe = !!(val&0x01000000);
-        break;
-    case 0x4c: /* INTCSR */
-        s->pciint = !!(val&0x40);
-        mrf_evr_update(s);
-        break;
-    case 0x54: /* GPIOC */
-        break; /* ignore */
-    default:
-        DBGOUT("invalid write for "TARGET_FMT_plx" %08x\n", addr, (unsigned)val);
-    }
-    DBGOUT("write "TARGET_FMT_plx" = %08x\n", addr, (unsigned)val);
-}
-
-static uint64_t
-plx9030_mmio_read(void *opaque, hwaddr addr, unsigned size)
-{
-    MRFPCIState *s = opaque;
-    switch(addr) {
-    case 0x28: /* LAS0BRD */
-        return s->evrbe ? 0x01000000 : 0;
-    case 0x4c: /* INTCSR */
-    {
-        uint64_t ret = 0x03; /* INT1 enable, active high */
-        if(s->pciint) ret |= 0x40; /* PCI interrupt enabled */
-        if(s->irqactive) ret |= 0x04; /* INT1 active */
-        return ret;
-    }
-    case 0x54: /* GPIOC */
-        return 0x00249924;
-    default:
-        DBGOUT("invalid read for "TARGET_FMT_plx"\n", addr);
-        return 0;
-    }
-}
-
-static const MemoryRegionOps plx9030_mmio_ops = {
-    .read = plx9030_mmio_read,
-    .write = plx9030_mmio_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .impl = {
-        .min_access_size = 4,
-        .max_access_size = 4,
-    },
-};
 
 static void
 evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
                  unsigned size)
 {
-    MRFPCIState *s = opaque;
+    EVRState *s = opaque;
     if(s->evrbe)
         val = __bswap_32(val);
 
@@ -207,8 +142,10 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
             s->fifo_in = s->fifo_out = 0;
         }
         s->masterena = !!(val&0x80000000);
-        if(!s->extbridge) {
+        if(s->intbridge) {
             s->evrbe = !(val&0x02000000);
+        } else {
+            val &= ~0x02000000;
         }
         val &= 0xff8067f8;
         break;
@@ -219,12 +156,20 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         val = s->evrreg[addr>>2] & ~(s->evrreg[addr>>2]&val);
         break;
     case 0x0C: /* IRQEnable */
-        if(!s->extbridge) {
+        if(s->intbridge && s->fwversion<0xa) {
             s->pciint = !!(val&0x40000000);
-        } else {
+        } else if(val&0x40000000) {
+            ERR(LOG_GUEST_ERROR, "Setting PCI MIE bit has no effect in IRQEnable\n");
             val &= ~0x40000000;
         }
         val &= 0xc000007f;
+        break;
+    case 0x1C: /* PCI Master Interrupt Enable */
+        if(s->intbridge && s->fwversion>=0xa) {
+            s->pciint = !!(val&0x40000000);
+        } else {
+            ERR(LOG_GUEST_ERROR, "PCI MIE not available with FW version %u\n", s->fwversion);
+        }
         break;
     case 0x20: /* buffer rx */
         if(val&0x00008000) {
@@ -248,6 +193,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     case 0x04: /* Control */
     case 0x08: /* IRQFlag */
     case 0x0C: /* IRQEnable */
+    case 0x1C: /* PCI MIE */
         mrf_evr_update(s);
         break;
     }
@@ -260,7 +206,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
 static uint64_t
 evr_mmio_read(void *opaque, hwaddr addr, unsigned size)
 {
-    MRFPCIState *s = opaque;
+    EVRState *s = opaque;
     uint32_t ret;
 
     /* reads with side-effects */
@@ -303,14 +249,14 @@ static const MemoryRegionOps evr_mmio_ops = {
 static
 int chr_link_can_read(void *opaque)
 {
-    MRFPCIState *d = opaque;
+    EVRState *d = opaque;
     return sizeof(d->rxbuf)-d->rxbuflen;
 }
 
 static
 void chr_link_read(void *opaque, const uint8_t *buf, int size)
 {
-    MRFPCIState *d = opaque;
+    EVRState *d = opaque;
     uint8_t *pbuf = d->rxbuf;
 
     memcpy(&pbuf[d->rxbuflen], buf, size);
@@ -391,7 +337,7 @@ void chr_link_read(void *opaque, const uint8_t *buf, int size)
 static
 void chr_link_event(void *opaque, int event)
 {
-    MRFPCIState *d = opaque;
+    EVRState *d = opaque;
     switch(event) {
     case CHR_EVENT_OPENED:
         DBGOUT("linkevent => opened\n");
@@ -414,17 +360,17 @@ uint32_t sfp_rom[512>>2];
 static void mrf_evr_reset(DeviceState *dev)
 {
     unsigned i;
-    MRFPCIState *s = MRF_EVR(dev);
+    EVRState *s = MRF_EVR(dev);
 
     s->evrreg[0x00>>2] = 0x00010000; /* link violation */
-    s->evrreg[0x2C>>2] = 0x11000003; /* PMC EVR w/ FW version 3 */
     s->evrreg[0x50>>2] = 0x00000200; /* always show PLL locked */
-    if(!s->extbridge) {
+    if(s->intbridge) {
         s->evrbe = 1;
-        s->evrreg[0x2C>>2] = 0x14000009; /* cPCI EVR w/ FW version 7 */
     } else {
-        s->evrreg[0x2C>>2] = 0x11000009; /* PMC EVR w/ FW version 3 */
+        s->pciint = 1;
     }
+
+    s->evrreg[0x2C>>2] = 0x10000000 | ((s->mrftype&0xf)<<24) | s->fwversion;
 
     /* TODO, mapping ram defaults */
 
@@ -433,38 +379,32 @@ static void mrf_evr_reset(DeviceState *dev)
     }
 }
 
-static int mrf_evr_init_230(PCIDevice *pci_dev)
+static
+bool evr_get_endian(Object *obj, Error **err)
 {
-    MRFPCIState *d = MRF_EVR(pci_dev);
-    d->extbridge = 1;
-
-    pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
-
-    memory_region_init_io(&d->plx9030, OBJECT(d), &plx9030_mmio_ops, d,
-                          "plx-ctrl", 128);
-    memory_region_init_io(&d->evr, OBJECT(d), &evr_mmio_ops, d,
-                          "mrf-evr", sizeof(d->evrreg));
-
-    pci_register_bar(pci_dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->plx9030);
-    pci_register_bar(pci_dev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->evr);
-
-    if(d->chr) {
-        qemu_chr_add_handlers(d->chr, chr_link_can_read, chr_link_read, chr_link_event, d);
-    }
-
-    return 0;
+    EVRState *d = MRF_EVR(obj);
+    return d->evrbe;
 }
 
-static int mrf_evr_init_300(PCIDevice *pci_dev)
+static
+void evr_set_endian(Object *obj, bool val, Error **err)
 {
-    MRFPCIState *d = MRF_EVR(pci_dev);
+    EVRState *d = MRF_EVR(obj);
+    DBGOUT("Set endian %u\n", (unsigned)val);
+    d->evrbe = !!val;
+}
 
-    pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
+static int mrf_evr_init(SysBusDevice *sdev)
+{
+    EVRState *d = MRF_EVR(sdev);
 
     memory_region_init_io(&d->evr, OBJECT(d), &evr_mmio_ops, d,
                           "mrf-evr", sizeof(d->evrreg));
 
-    pci_register_bar(pci_dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->evr);
+    sysbus_init_mmio(sdev, &d->evr);
+    qdev_init_gpio_out(DEVICE(sdev), &d->irq, 1);
+
+    object_property_add_bool(OBJECT(sdev), "endian", &evr_get_endian, &evr_set_endian, &error_abort);
 
     if(d->chr) {
         qemu_chr_add_handlers(d->chr, chr_link_can_read, chr_link_read, chr_link_event, d);
@@ -474,75 +414,36 @@ static int mrf_evr_init_300(PCIDevice *pci_dev)
 }
 
 static Property mrfevrport_properties[] = {
-    DEFINE_PROP_CHR("chardev", MRFPCIState, chr),
+    DEFINE_PROP_BOOL("soft-bridge", EVRState, intbridge, 0),
+    DEFINE_PROP_UINT8("mrf-type", EVRState, mrftype, 1),
+    DEFINE_PROP_UINT8("version", EVRState, fwversion, 6),
+    DEFINE_PROP_CHR("chardev", EVRState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void mrf_evr_class_init_230(ObjectClass *klass, void *data)
+static void mrf_evr_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
-    /*MRFPCIBaseClass *e = MRF_EVR_DEVICE_CLASS(klass);*/
+    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 
-    k->vendor_id = 0x10b5; /* PLX */
-    k->device_id = 0x9030;
-    k->subsystem_vendor_id = 0x1a3e;
-    k->subsystem_id = 0x11e6;
-    k->class_id = 0x1180;
-    /* TODO capabilities? */
-    k->revision = 2;
-    k->init = &mrf_evr_init_230;
+    k->init = &mrf_evr_init;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->desc = "Micro Research PMC-EVR-230";
+    dc->desc = "Micro Research EVR core";
     dc->reset = mrf_evr_reset;
     dc->props = mrfevrport_properties;
 }
 
-static void mrf_evr_class_init_300(ObjectClass *klass, void *data)
-{
-    DeviceClass *dc = DEVICE_CLASS(klass);
-    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
-    /*MRFPCIBaseClass *e = MRF_EVR_DEVICE_CLASS(klass);*/
-
-    k->vendor_id = 0x1a3e; /* MRF */
-    k->device_id = 0x152c;
-    k->subsystem_vendor_id = 0x1a3e;
-    k->subsystem_id = 0x152c;
-    k->class_id = 0x1180;
-    /* TODO capabilities? */
-    k->revision = 2;
-    k->init = &mrf_evr_init_300;
-    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->desc = "Micro Research cPCI-EVR-300";
-    dc->reset = mrf_evr_reset;
-    dc->props = mrfevrport_properties;
-}
-
-static const TypeInfo mrf_evr_base_info = {
-    .name          = TYPE_MRF_EVR_BASE,
-    .parent        = TYPE_PCI_DEVICE,
-    .instance_size = sizeof(MRFPCIState),
-    .class_size    = sizeof(MRFPCIBaseClass),
-    .abstract      = true,
-};
-
-static const TypeInfo mrf_evr_230_info = {
-    .name          = "mrf-pmc-evr-230",
-    .parent        = TYPE_MRF_EVR_BASE,
-    .class_init    = mrf_evr_class_init_230,
-};
-
-static const TypeInfo mrf_evr_300_info = {
-    .name          = "mrf-cpci-evr-300",
-    .parent        = TYPE_MRF_EVR_BASE,
-    .class_init    = mrf_evr_class_init_300,
+static const TypeInfo mrf_evr_info = {
+    .name          = TYPE_MRF_EVR,
+    .parent        = TYPE_SYS_BUS_DEVICE,
+    .instance_size = sizeof(EVRState),
+    .class_size    = sizeof(SysBusDeviceClass),
+    .class_init    = mrf_evr_class_init,
 };
 
 static void mrf_evr_register_types(void)
 {
-    type_register_static(&mrf_evr_base_info);
-    type_register_static(&mrf_evr_230_info);
-    type_register_static(&mrf_evr_300_info);
+    type_register_static(&mrf_evr_info);
 }
 
 type_init(mrf_evr_register_types)

@@ -20,13 +20,8 @@
 
 
 #include "hw/hw.h"
-#include "hw/pci/pci.h"
-#include "net/net.h"
-#include "net/checksum.h"
-#include "hw/loader.h"
-#include "sysemu/sysemu.h"
+#include "hw/sysbus.h"
 #include "sysemu/char.h"
-#include "qemu/iov.h"
 
 #define MRF_DEBUG
 
@@ -38,34 +33,38 @@
 #define	DBGOUT(fmt, ...) do {} while (0)
 #endif
 
+#define ERR(mask, fmt, ...)  qemu_log_mask(mask, TYPE_MRF_EVG ": " fmt, ## __VA_ARGS__)
+
 #define NELEM(N) (sizeof(N)/sizeof((N)[0]))
 
-#define TYPE_MRF_EVG_BASE "mrf-pcievg"
+#define TYPE_MRF_EVG "mrf-evg"
 
 #define MRF_EVG(obj) \
-    OBJECT_CHECK(EVGState, (obj), TYPE_MRF_EVG_BASE)
+    OBJECT_CHECK(EVGState, (obj), TYPE_MRF_EVG)
 
 #define MRF_EVG_DEVICE_CLASS(klass) \
-     OBJECT_CLASS_CHECK(MRFEVGBaseClass, (klass), TYPE_MRF_EVG_BASE)
+     OBJECT_CLASS_CHECK(MRFEVGBaseClass, (klass), TYPE_MRF_EVG)
 #define MRF_EVG_DEVICE_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(MRFEVGBaseClass, (obj), TYPE_MRF_EVG_BASE)
+    OBJECT_GET_CLASS(MRFEVGBaseClass, (obj), TYPE_MRF_EVG)
 
 typedef struct {
     /*< private >*/
-    PCIDevice parent_obj;
+    SysBusDevice parent_obj;
 
     CharDriverState *chr; /* event link */
 
-    MemoryRegion plx9030;
     MemoryRegion evg;
 
-    unsigned int extbridge:1; /* 1 - PLX 9030, 0 - integrated */
-    /* plx 9030 */
-    unsigned int evgbe:1;
-    unsigned int pciint:1;
+    qemu_irq irq;
+
+    uint8_t mrftype, fwversion;
+    bool intbridge;
+
+    bool evgbe;
+    bool pciint;
     /* evg */
-    unsigned int masterena:1;
-    unsigned int irqactive:1;
+    bool masterena;
+
     uint8_t dbus;
 
     uint32_t evgreg[64*1024/4];
@@ -87,8 +86,7 @@ void mrf_evg_update(EVGState *s)
         int level = s->pciint && (ena&0x80000000) && actirq;
         DBGOUT("IRQ %d Flag %08x Act %08x Ena %08x\n", level,
                (unsigned)rawirq, (unsigned)actirq, (unsigned)ena);
-        s->irqactive = !!level;
-        pci_set_irq(&s->parent_obj, !!level);
+        qemu_set_irq(s->irq, !!level);
     }
 }
 
@@ -192,59 +190,6 @@ void evg_dbuf_send(EVGState *d)
 }
 
 static void
-plx9030_mmio_write(void *opaque, hwaddr addr, uint64_t val,
-                 unsigned size)
-{
-    EVGState *s = opaque;
-    switch(addr) {
-    case 0x28: /* LAS0BRD */
-        s->evgbe = !!(val&0x01000000);
-        break;
-    case 0x4c: /* INTCSR */
-        s->pciint = !!(val&0x40);
-        mrf_evg_update(s);
-        break;
-    case 0x54: /* GPIOC */
-        break; /* ignore */
-    default:
-        DBGOUT("invalid write for "TARGET_FMT_plx" %08x\n", addr, (unsigned)val);
-    }
-    DBGOUT("write "TARGET_FMT_plx" = %08x\n", addr, (unsigned)val);
-}
-
-static uint64_t
-plx9030_mmio_read(void *opaque, hwaddr addr, unsigned size)
-{
-    EVGState *s = opaque;
-    switch(addr) {
-    case 0x28: /* LAS0BRD */
-        return s->evgbe ? 0x01000000 : 0;
-    case 0x4c: /* INTCSR */
-    {
-        uint64_t ret = 0x03; /* INT1 enable, active high */
-        if(s->pciint) ret |= 0x40; /* PCI interrupt enabled */
-        if(s->irqactive) ret |= 0x04; /* INT1 active */
-        return ret;
-    }
-    case 0x54: /* GPIOC */
-        return 0x00249924;
-    default:
-        DBGOUT("invalid read for "TARGET_FMT_plx"\n", addr);
-        return 0;
-    }
-}
-
-static const MemoryRegionOps plx9030_mmio_ops = {
-    .read = plx9030_mmio_read,
-    .write = plx9030_mmio_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .impl = {
-        .min_access_size = 4,
-        .max_access_size = 4,
-    },
-};
-
-static void
 evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
                  unsigned size)
 {
@@ -265,7 +210,7 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         return;
     case 0x04: /* Control */
         s->masterena = !!(val&0x80000000);
-        if(!s->extbridge) {
+        if(s->intbridge) {
             s->evgbe = !(val&0x02000000);
         }
         val &= 0xf7000000;
@@ -277,9 +222,10 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         val = s->evgreg[addr>>2] & ~(s->evgreg[addr>>2]&val);
         break;
     case 0x0C: /* IRQEnable */
-        if(!s->extbridge) {
+        if(s->intbridge && s->fwversion<0x8) {
             s->pciint = !!(val&0x40000000);
-        } else {
+        } else if(val&0x40000000) {
+            ERR(LOG_GUEST_ERROR, "Setting PCI MIE bit has no effect in IRQEnable\n");
             val &= ~0x40000000;
         }
         val &= 0xc0003363;
@@ -287,6 +233,13 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     case 0x18: /* Software event */
         val &= 0x1ff; /* SW can't set pending bit */
         val |= s->evgreg[addr>>2]&0x200;
+        break;
+    case 0x1C: /* PCI Master Interrupt Enable */
+        if(s->intbridge && s->fwversion>=0x8) {
+            s->pciint = !!(val&0x40000000);
+        } else {
+            ERR(LOG_GUEST_ERROR, "PCI MIE not available with FW version %u\n", s->fwversion);
+        }
         break;
     case 0x20: /* buffer TX */
         val &= 0x000707fc;
@@ -305,6 +258,7 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
     case 0x04: /* Control */
     case 0x08: /* IRQFlag */
     case 0x0C: /* IRQEnable */
+    case 0x1C: /* PCI Master Interrupt Enable */
         mrf_evg_update(s);
         break;
     case 0x18: /* Software event */
@@ -420,38 +374,31 @@ void chr_link_event(void *opaque, int event)
     }
 }
 
-static int mrf_evg_init_230(PCIDevice *pci_dev)
+static
+bool evg_get_endian(Object *obj, Error **err)
 {
-    EVGState *d = MRF_EVG(pci_dev);
-    d->extbridge = 1;
-
-    pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
-
-    memory_region_init_io(&d->plx9030, OBJECT(d), &plx9030_mmio_ops, d,
-                          "plx-ctrl", 128);
-    memory_region_init_io(&d->evg, OBJECT(d), &evg_mmio_ops, d,
-                          "mrf-evg", sizeof(d->evgreg));
-
-    pci_register_bar(pci_dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->plx9030);
-    pci_register_bar(pci_dev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->evg);
-
-    if(d->chr) {
-        qemu_chr_add_handlers(d->chr, chr_link_can_read, chr_link_read, chr_link_event, d);
-    }
-
-    return 0;
+    EVGState *d = MRF_EVG(obj);
+    return d->evgbe;
 }
 
-static int mrf_evg_init_300(PCIDevice *pci_dev)
+static
+void evg_set_endian(Object *obj, bool val, Error **err)
 {
-    EVGState *d = MRF_EVG(pci_dev);
+    EVGState *d = MRF_EVG(obj);
+    DBGOUT("Set endian %u\n", (unsigned)val);
+    d->evgbe = !!val;
+}
 
-    pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
+static int mrf_evg_init(SysBusDevice *sdev)
+{
+    EVGState *d = MRF_EVG(sdev);
 
     memory_region_init_io(&d->evg, OBJECT(d), &evg_mmio_ops, d,
                           "mrf-evg", sizeof(d->evgreg));
+    sysbus_init_mmio(sdev, &d->evg);
+    qdev_init_gpio_out(DEVICE(sdev), &d->irq, 1);
 
-    pci_register_bar(pci_dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &d->evg);
+    object_property_add_bool(OBJECT(sdev), "endian", &evg_get_endian, &evg_set_endian, &error_abort);
 
     if(d->chr) {
         qemu_chr_add_handlers(d->chr, chr_link_can_read, chr_link_read, chr_link_event, d);
@@ -465,84 +412,47 @@ static void mrf_evg_reset(DeviceState *dev)
     EVGState *s = MRF_EVG(dev);
 
     s->evgreg[0x04>>2] = 0x60000000;
-    if(!s->extbridge) {
+    if(s->intbridge) {
         s->evgbe = 1;
-        s->evgreg[0x2C>>2] = 0x24000007; /* cPCI EVG w/ FW version 7 */
     } else {
-        s->evgreg[0x2C>>2] = 0x27000007; /* PCIe EVG w/ FW version 7 */
+        s->pciint = 1;
     }
+    s->evgreg[0x2C>>2] = 0x20000000 | ((s->mrftype&0xf)<<24) | s->fwversion;
 
     /* TODO, SFP info */
 }
 
 static Property mrfevgport_properties[] = {
+    DEFINE_PROP_BOOL("soft-bridge", EVGState, intbridge, 0),
+    DEFINE_PROP_UINT8("mrf-type", EVGState, mrftype, 1),
+    DEFINE_PROP_UINT8("version", EVGState, fwversion, 6),
     DEFINE_PROP_CHR("chardev", EVGState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void mrf_evg_class_init_230(ObjectClass *klass, void *data)
+static void mrf_evg_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 
-    k->vendor_id = 0x10b5; /* PLX */
-    k->device_id = 0x9030;
-    k->subsystem_vendor_id = 0x1a3e;
-    k->subsystem_id = 0x20E6;
-    k->class_id = 0x1180;
-    /* TODO capabilities? */
-    k->revision = 2;
-    k->init = &mrf_evg_init_230;
+    k->init = &mrf_evg_init;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->desc = "Micro Research cPCI-EVG-230";
+    dc->desc = "Micro Research EVG core";
     dc->reset = mrf_evg_reset;
     dc->props = mrfevgport_properties;
 }
 
-static void mrf_evg_class_init_300(ObjectClass *klass, void *data)
-{
-    DeviceClass *dc = DEVICE_CLASS(klass);
-    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
-
-    k->vendor_id = 0x1a3e; /* MRF */
-    k->device_id = 0x252c;
-    k->subsystem_vendor_id = 0x1a3e;
-    k->subsystem_id = 0x252c;
-    k->class_id = 0x1180;
-    /* TODO capabilities? */
-    k->revision = 1;
-    k->init = &mrf_evg_init_300;
-    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
-    dc->desc = "Micro Research cPCI-EVG-300";
-    dc->reset = mrf_evg_reset;
-    dc->props = mrfevgport_properties;
-}
-
-static const TypeInfo mrf_evg_base_info = {
-    .name          = TYPE_MRF_EVG_BASE,
-    .parent        = TYPE_PCI_DEVICE,
+static const TypeInfo mrf_evg_info = {
+    .name          = TYPE_MRF_EVG,
+    .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(EVGState),
-    .class_size    = sizeof(PCIDeviceClass),
-    .abstract      = true,
-};
-
-static const TypeInfo mrf_evg_230_info = {
-    .name          = "mrf-cpci-evg-230",
-    .parent        = TYPE_MRF_EVG_BASE,
-    .class_init    = mrf_evg_class_init_230,
-};
-
-static const TypeInfo mrf_evg_300_info = {
-    .name          = "mrf-cpci-evg-300",
-    .parent        = TYPE_MRF_EVG_BASE,
-    .class_init    = mrf_evg_class_init_300,
+    .class_size    = sizeof(SysBusDeviceClass),
+    .class_init    = mrf_evg_class_init,
 };
 
 static void mrf_evg_register_types(void)
 {
-    type_register_static(&mrf_evg_base_info);
-    type_register_static(&mrf_evg_230_info);
-    type_register_static(&mrf_evg_300_info);
+    type_register_static(&mrf_evg_info);
 }
 
 type_init(mrf_evg_register_types)
