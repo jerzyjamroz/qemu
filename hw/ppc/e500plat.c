@@ -47,6 +47,7 @@ static void e500plat_init(MachineState *machine)
         .pci_mmio_base = 0xC00000000ULL,
         .pci_mmio_bus_base = 0xE0000000ULL,
         .spin_base = 0xFEF000000ULL,
+        .decrementor_freq = 400000000,
     };
 
     /* Older KVM versions don't support EPR which breaks guests when we announce
