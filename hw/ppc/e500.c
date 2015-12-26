@@ -15,6 +15,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "e500.h"
@@ -1050,13 +1051,63 @@ typedef struct PPCE500CCSRState {
     SysBusDevice parent;
     /*< public >*/
 
-    MemoryRegion ccsr_space;
+    MemoryRegion ccsr_space, ccsr_core;
 
     uint32_t base;
 } PPCE500CCSRState;
 
 #define TYPE_CCSR "e500-ccsr"
 #define CCSR(obj) OBJECT_CHECK(PPCE500CCSRState, (obj), TYPE_CCSR)
+
+static
+uint64_t ccsr_core_read(void *opaque, hwaddr addr, unsigned size)
+{
+    PPCE500CCSRState *ccsr = opaque;
+    switch(addr) {
+    case 0: /* CCSRBAR */
+        return ccsr->base>>12;
+    case 8:
+    case 0x10:
+    case 0x20:
+        qemu_log_mask(LOG_UNIMP, "ALTCBAR, ALTCAR, and BPTR not implemented");
+        return 0;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "undefined ccsr regster %x\n",
+                      (unsigned)addr);
+        return 0;
+    }
+}
+
+static
+void ccsr_core_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+{
+    PPCE500CCSRState *ccsr = opaque;
+    switch(addr) {
+    case 0: /* CCSRBAR */
+        val &= 0x000fff00;
+        ccsr->base = val<<12;
+        sysbus_mmio_map(SYS_BUS_DEVICE(ccsr), 0, ccsr->base);
+        break;
+    case 8:
+    case 0x10:
+    case 0x20:
+        qemu_log_mask(LOG_UNIMP, "ALTCBAR, ALTCAR, and BPTR not implemented");
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "undefined ccsr regster %x\n",
+                      (unsigned)addr);
+    }
+}
+
+static const MemoryRegionOps ccsr_core_ops = {
+    .read = ccsr_core_read,
+    .write = ccsr_core_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+    .impl = {
+        .min_access_size = 4,
+        .max_access_size = 4,
+    }
+};
 
 static int e500_ccsr_initfn(SysBusDevice *dev)
 {
@@ -1065,6 +1116,9 @@ static int e500_ccsr_initfn(SysBusDevice *dev)
     ccsr = CCSR(dev);
     memory_region_init(&ccsr->ccsr_space, OBJECT(ccsr), "e500-ccsr",
                        MPC8544_CCSRBAR_SIZE);
+    memory_region_init_io(&ccsr->ccsr_core, OBJECT(ccsr), &ccsr_core_ops,
+                          ccsr, "ccsr-core", 0x24);
+    memory_region_add_subregion(&ccsr->ccsr_space, 0, &ccsr->ccsr_core);
     sysbus_init_mmio(dev, &ccsr->ccsr_space);
     sysbus_mmio_map(dev, 0, ccsr->base);
     return 0;
