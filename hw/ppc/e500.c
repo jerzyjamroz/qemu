@@ -18,7 +18,6 @@
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "e500.h"
-#include "e500-ccsr.h"
 #include "net/net.h"
 #include "qemu/config-file.h"
 #include "hw/hw.h"
@@ -1045,6 +1044,18 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     boot_info->dt_base = dt_base;
     boot_info->dt_size = dt_size;
 }
+
+
+typedef struct PPCE500CCSRState {
+    /*< private >*/
+    SysBusDevice parent;
+    /*< public >*/
+
+    MemoryRegion ccsr_space;
+} PPCE500CCSRState;
+
+#define TYPE_CCSR "e500-ccsr"
+#define CCSR(obj) OBJECT_CHECK(PPCE500CCSRState, (obj), TYPE_CCSR)
 
 static int e500_ccsr_initfn(SysBusDevice *dev)
 {
