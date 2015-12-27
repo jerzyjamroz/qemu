@@ -11419,13 +11419,13 @@ void gen_intermediate_code(CPUARMState *env, TranslationBlock *tb)
             break;
         }
 #else
-        if (dc->pc >= 0xfffffff0 && arm_dc_feature(dc, ARM_FEATURE_M)) {
-            /* We always get here via a jump, so know we are not in a
-               conditional execution block.  */
-            gen_exception_internal(EXCP_EXCEPTION_EXIT);
-            dc->is_jmp = DISAS_EXC;
-            break;
-        }
+        /* For ARM v7m
+         * Branch to the "magic" exception return addresses
+         * should already have handled during the attempt
+         * to load a page containing them.
+         * See arm_v7m_unassigned_access()
+         */
+        assert(!arm_dc_feature(dc, ARM_FEATURE_M) || dc->pc < 0xfffffff0);
 #endif
 
         if (unlikely(!QTAILQ_EMPTY(&cs->breakpoints))) {
