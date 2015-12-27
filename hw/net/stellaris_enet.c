@@ -406,7 +406,10 @@ static void stellaris_enet_write(void *opaque, hwaddr offset,
         s->thr = value;
         break;
     case 0x20: /* MCTL */
-        s->mctl = value;
+        /* TODO: MII registers aren't modeled,
+         * Always clear START as if the operation completes immediately
+         */
+        s->mctl = value&~1;
         break;
     case 0x24: /* MDV */
         s->mdv = value;
