@@ -5754,10 +5754,12 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
         /* TODO: classify faults other than undefined instruction */
         env->v7m.cfsr |= CFSR_UNDEFINSTR;
+        qemu_log_mask(CPU_LOG_INT, "EXC USAGE from %08x\n", (unsigned)env->regs[15]);
         break;
     case EXCP_SWI:
         /* The PC already points to the next instruction.  */
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_SVC);
+        qemu_log_mask(CPU_LOG_INT, "EXC SWI from %08x\n", (unsigned)env->regs[15]);
         break;
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
@@ -5774,6 +5776,9 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
             armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_BUS);
             env->v7m.bfar = env->exception.vaddress;
             env->v7m.cfsr |= CFSR_BFARVALID;
+            qemu_log_mask(CPU_LOG_INT, "EXC BUS from %08x at %08x (%08x)\n",
+                          (unsigned)env->regs[15], (unsigned)env->v7m.bfar,
+                    (unsigned)env->v7m.cfsr);
             break;
         case 0xd: /* Permission fault */
         default:
@@ -5788,6 +5793,9 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
             armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
             env->v7m.mmfar = env->exception.vaddress;
             env->v7m.cfsr |= CFSR_MMARVALID;
+            qemu_log_mask(CPU_LOG_INT, "MEM BUS from %08x at %08x (%08x)\n",
+                          (unsigned)env->regs[15], (unsigned)env->v7m.mmfar,
+                    (unsigned)env->v7m.cfsr);
             break;
         }
         break;
@@ -5807,8 +5815,10 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_DEBUG);
         return;
     case EXCP_IRQ:
+        qemu_log_mask(CPU_LOG_INT, "EXC IRQ while %08x\n", (unsigned)env->regs[15]);
         break;
     case EXCP_EXCEPTION_EXIT:
+        qemu_log_mask(CPU_LOG_INT, "EXC RET while %08x\n", (unsigned)env->regs[15]);
         do_v7m_exception_exit(env);
         return;
     default:
