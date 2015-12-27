@@ -200,7 +200,6 @@ void armv7m_realize(int mem_size, const char *kernel_filename)
     uint64_t entry;
     uint64_t lowaddr;
     int big_endian;
-    MemoryRegion *hack = g_new(MemoryRegion, 1);
 
 #ifdef TARGET_WORDS_BIGENDIAN
     big_endian = 1;
@@ -225,13 +224,6 @@ void armv7m_realize(int mem_size, const char *kernel_filename)
             exit(1);
         }
     }
-
-    /* Hack to map an additional page of ram at the top of the address
-       space.  This stops qemu complaining about executing code outside RAM
-       when returning from an exception.  */
-    memory_region_init_ram(hack, NULL, "armv7m.hack", 0x1000, &error_fatal);
-    vmstate_register_ram_global(hack);
-    memory_region_add_subregion(get_system_memory(), 0xfffff000, hack);
 
     /* Realizing cpu calls cpu_reset(), which must have rom image
      * already mapped to find the correct entry point.

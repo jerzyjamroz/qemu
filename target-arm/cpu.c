@@ -281,6 +281,34 @@ bool arm_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 }
 
 #if !defined(CONFIG_USER_ONLY) || !defined(TARGET_AARCH64)
+static void arm_v7m_unassigned_access(CPUState *cpu, hwaddr addr,
+                                      bool is_write, bool is_exec, int opaque,
+                                      unsigned size)
+{
+    ARMCPU *arm = ARM_CPU(cpu);
+    CPUARMState *env = &arm->env;
+
+    env->exception.vaddress = addr;
+    env->exception.fsr = is_write ? 0x808 : 0x8; /* Precise External Abort */
+    if (env->v7m.exception != 0 && addr >= 0xfffffff0 && !is_write) {
+        /* Strictly speaking exception returns should be caught
+         * by the instruction updating the PC.  However, there
+         * are several of these.
+         * As a shortcut attempts to branch to "magic" address,
+         * then trap here when the TLB lookup fails.
+         *
+         * Note that is_exec is not set since unassigned_mem_read()
+         * doesn't know if the goal is execution.
+         */
+        cpu->exception_index = EXCP_EXCEPTION_EXIT;
+    } else if (is_exec) {
+        cpu->exception_index = EXCP_PREFETCH_ABORT;
+    } else {
+        cpu->exception_index = EXCP_DATA_ABORT;
+    }
+    cpu_loop_exit(cpu);
+}
+
 static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 {
     CPUClass *cc = CPU_GET_CLASS(cs);
@@ -295,19 +323,9 @@ static bool arm_v7m_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         cc->do_interrupt(cs);
         ret = true;
     }
-    /* ARMv7-M interrupt return works by loading a magic value
-     * into the PC.  On real hardware the load causes the
-     * return to occur.  The qemu implementation performs the
-     * jump normally, then does the exception return when the
-     * CPU tries to execute code at the magic address.
-     * This will cause the magic PC value to be pushed to
-     * the stack if an interrupt occurred at the wrong time.
-     * We avoid this by disabling interrupts when
-     * pc contains a magic address.
-     */
     if (interrupt_request & CPU_INTERRUPT_HARD
         && !(env->daif & PSTATE_I)
-        && (env->regs[15] < 0xfffffff0)) {
+            ) {
         cs->exception_index = EXCP_IRQ;
         cc->do_interrupt(cs);
         ret = true;
@@ -951,6 +969,7 @@ static void arm_v7m_class_init(ObjectClass *oc, void *data)
     cc->do_interrupt = arm_v7m_cpu_do_interrupt;
 #endif
 
+    cc->do_unassigned_access = arm_v7m_unassigned_access;
     cc->cpu_exec_interrupt = arm_v7m_cpu_exec_interrupt;
 }
 
