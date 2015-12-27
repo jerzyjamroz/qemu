@@ -856,6 +856,52 @@ static const MemoryRegionOps stellaris_i2c_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
+typedef struct {
+    uint32_t base;
+    const char *name;
+} stellaris_unimpl;
+
+static uint64_t stellaris_unimpl_read(void *opaque, hwaddr offset,
+                                   unsigned size)
+{
+    stellaris_unimpl *priv = opaque;
+    offset += priv->base;
+    qemu_log_mask(LOG_UNIMP, "Read from unimplemented %s %08x -> 0\n",
+                  priv->name, (unsigned)offset);
+    return 0;
+}
+
+static void stellaris_unimpl_write(void *opaque, hwaddr offset,
+                                uint64_t value, unsigned size)
+{
+    stellaris_unimpl *priv = opaque;
+    offset += priv->base;
+    qemu_log_mask(LOG_UNIMP, "Write to unimplemented %s %08x <- %08x\n",
+                  priv->name, (unsigned)offset, (unsigned)value);
+}
+
+static const MemoryRegionOps stellaris_unimpl_ops = {
+    .read = stellaris_unimpl_read,
+    .write = stellaris_unimpl_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
+static
+void stellaris_unimpl_add(Object *parent, const char *name,
+                          uint32_t base, uint32_t size)
+{
+    stellaris_unimpl *priv = g_malloc0(sizeof(*priv));
+    MemoryRegion *system_memory = get_system_memory(),
+                 *unimpl = g_malloc0(sizeof(*unimpl));
+
+    priv->name = name;
+    priv->base = base;
+
+    memory_region_init_io(unimpl, parent, &stellaris_unimpl_ops,
+                          priv, name, size);
+    memory_region_add_subregion_overlap(system_memory, base, unimpl, -1);
+}
+
 static const VMStateDescription vmstate_stellaris_i2c = {
     .name = "stellaris_i2c",
     .version_id = 1,
@@ -1371,6 +1417,13 @@ static void stellaris_init(const char *kernel_filename, const char *cpu_model,
             }
         }
     }
+    stellaris_unimpl_add(OBJECT(nvic), "I2C1",          0x40028000, 0x1000);
+    stellaris_unimpl_add(OBJECT(nvic), "PWM",           0x40028000, 0x1000);
+    stellaris_unimpl_add(OBJECT(nvic), "QEI0",          0x4002C000, 0x1000);
+    stellaris_unimpl_add(OBJECT(nvic), "QEI1",          0x4002D000, 0x1000);
+    stellaris_unimpl_add(OBJECT(nvic), "Analog Comp.",  0x4003C000, 0x1000);
+    stellaris_unimpl_add(OBJECT(nvic), "Hibernation",   0x400FC000, 0x1000);
+    stellaris_unimpl_add(OBJECT(nvic), "Flash control", 0x400FD000, 0x1000);
 }
 
 /* FIXME: Figure out how to generate these from stellaris_boards.  */
