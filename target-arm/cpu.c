@@ -176,7 +176,7 @@ static void arm_cpu_reset(CPUState *s)
 
         env->v7m.exception_prio = env->v7m.pending_prio = 0x100;
 
-        env->daif &= ~PSTATE_I;
+        env->daif &= ~(PSTATE_I|PSTATE_F);
         rom = rom_ptr(0);
         if (rom) {
             /* Address zero is covered by ROM which hasn't yet been
