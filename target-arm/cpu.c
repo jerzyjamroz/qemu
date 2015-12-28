@@ -282,7 +282,7 @@ bool arm_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     return ret;
 }
 
-#if !defined(CONFIG_USER_ONLY) || !defined(TARGET_AARCH64)
+#if !defined(CONFIG_USER_ONLY)
 static void arm_v7m_unassigned_access(CPUState *cpu, hwaddr addr,
                                       bool is_write, bool is_exec, int opaque,
                                       unsigned size)
@@ -961,14 +961,14 @@ static void cortex_m4_initfn(Object *obj)
 }
 static void arm_v7m_class_init(ObjectClass *oc, void *data)
 {
+#ifndef CONFIG_USER_ONLY
     CPUClass *cc = CPU_CLASS(oc);
 
-#ifndef CONFIG_USER_ONLY
     cc->do_interrupt = arm_v7m_cpu_do_interrupt;
-#endif
 
     cc->do_unassigned_access = arm_v7m_unassigned_access;
     cc->cpu_exec_interrupt = arm_v7m_cpu_exec_interrupt;
+#endif
 }
 
 static const ARMCPRegInfo cortexr5_cp_reginfo[] = {
