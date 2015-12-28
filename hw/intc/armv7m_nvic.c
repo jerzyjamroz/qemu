@@ -122,19 +122,25 @@ static void systick_reset(nvic_state *s)
    IRQ is #16.  The internal GIC routines use #32 as the first IRQ.  */
 void armv7m_nvic_set_pending(void *opaque, int irq)
 {
+    ARMCPU *cpu = ARM_CPU(first_cpu);
+    CPUARMState *env = &cpu->env;
     nvic_state *s = (nvic_state *)opaque;
     if (irq >= 16)
         irq += 16;
     gic_set_pending_private(&s->gic, 0, irq);
+    env->v7m.pending_prio = s->gic.current_pending[0];
 }
 
 /* Make pending IRQ active.  */
 int armv7m_nvic_acknowledge_irq(void *opaque)
 {
+    ARMCPU *cpu = ARM_CPU(first_cpu);
+    CPUARMState *env = &cpu->env;
     nvic_state *s = (nvic_state *)opaque;
     uint32_t irq;
 
     irq = gic_acknowledge_irq(&s->gic, 0, MEMTXATTRS_UNSPECIFIED);
+    env->v7m.pending_prio = s->gic.current_pending[0];
     if (irq == 1023)
         hw_error("Interrupt but no vector\n");
     if (irq >= 32)
