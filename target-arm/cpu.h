@@ -397,6 +397,11 @@ typedef struct CPUARMState {
         uint32_t vecbase;
         uint32_t basepri;
         uint32_t control;
+        uint32_t ccr; /* Configuration and Control */
+        uint32_t cfsr; /* Configurable Fault Status */
+        uint32_t hfsr; /* HardFault Status */
+        uint32_t mmfar; /* MemManage Fault Address */
+        uint32_t bfar; /* BusFault Address */
         int exception;
     } v7m;
 
@@ -874,6 +879,51 @@ enum arm_cpu_mode {
 #define ARM_IWMMXT_wCGR1	9
 #define ARM_IWMMXT_wCGR2	10
 #define ARM_IWMMXT_wCGR3	11
+
+/* V7M CCSR bits */
+#define CCR_STKALIGN        0x00000200
+#define CCR_BFHFNMIGN       0x00000100
+#define CCR_DIV_0_TRP       0x00000010
+#define CCR_UNALIGN_TRP     0x00000008
+#define CCR_USERSETMPEND    0x00000002
+#define CCR_NONBASETHRDENA  0x00000001
+
+/* V7M CFSR bits for UFSR */
+#define CFSR_DIVBYZERO      0x02000000
+#define CFSR_UNALIGNED      0x01000000
+#define CFSR_NOCP           0x00080000
+#define CFSR_INVPC          0x00040000
+#define CFSR_INVSTATE       0x00020000
+#define CFSR_UNDEFINSTR     0x00010000
+
+/* V7M CFSR bits for BFSR */
+#define CFSR_BFARVALID      0x00008000
+#define CFSR_LSPERR         0x00002000
+#define CFSR_STKERR         0x00001000
+#define CFSR_UNSTKERR       0x00000800
+#define CFSR_IMPRECISERR    0x00000400
+#define CFSR_PRECISERR      0x00000200
+#define CFSR_IBUSERR        0x00000100
+
+/* V7M CFSR bits for MMFSR */
+#define CFSR_MMARVALID      0x00000080
+#define CFSR_MLSPERR        0x00000020
+#define CFSR_MSTKERR        0x00000010
+#define CFSR_MUNSTKERR      0x00000008
+#define CFSR_DACCVIOL       0x00000002
+#define CFSR_IACCVIOL       0x00000001
+
+/* V7M HFSR bits */
+#define HFSR_DEBUG_VT       0x80000000
+#define HFSR_FORCED         0x40000000
+#define HFSR_VECTTBL        0x00000002
+
+/* V7M DFSR bits */
+#define DFSR_EXTERNAL       0x00000010
+#define DFSR_VCATCH         0x00000008
+#define DFSR_DWTTRAP        0x00000004
+#define DFSR_BKPT           0x00000002
+#define DFSR_HALTED         0x00000001
 
 /* If adding a feature bit which corresponds to a Linux ELF
  * HWCAP bit, remember to update the feature-bit-to-hwcap
