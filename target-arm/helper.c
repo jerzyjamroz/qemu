@@ -5645,6 +5645,8 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
     switch (cs->exception_index) {
     case EXCP_UDEF:
         armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_USAGE);
+        /* TODO: classify faults other than undefined instruction */
+        env->v7m.cfsr |= CFSR_UNDEFINSTR;
         return;
     case EXCP_SWI:
         /* The PC already points to the next instruction.  */
