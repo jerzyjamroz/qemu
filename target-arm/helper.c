@@ -5683,10 +5683,8 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         return; /* Never happens.  Keep compiler happy.  */
     }
 
-    /* Align stack pointer.  */
-    /* ??? Should only do this if Configuration Control Register
-       STACKALIGN bit is set.  */
-    if (env->regs[13] & 4) {
+    /* Align stack pointer (STACKALIGN)  */
+    if ((env->regs[13] & 4) && (env->v7m.ccr & CCR_STKALIGN)) {
         env->regs[13] -= 4;
         xpsr |= 0x200;
     }
