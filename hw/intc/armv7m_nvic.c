@@ -19,6 +19,7 @@
 
 typedef struct {
     GICState gic;
+    ARMCPU *cpu; /* NVIC is so closely tied to the CPU, just keep a ref */
     struct {
         uint32_t control;
         uint32_t reload;
@@ -151,7 +152,7 @@ void armv7m_nvic_complete_irq(void *opaque, int irq)
 
 static uint32_t nvic_readl(nvic_state *s, uint32_t offset)
 {
-    ARMCPU *cpu;
+    ARMCPU *cpu = s->cpu;
     uint32_t val;
     int irq;
 
@@ -183,11 +184,9 @@ static uint32_t nvic_readl(nvic_state *s, uint32_t offset)
     case 0x1c: /* SysTick Calibration Value.  */
         return 10000;
     case 0xd00: /* CPUID Base.  */
-        cpu = ARM_CPU(current_cpu);
         return cpu->midr;
     case 0xd04: /* Interrupt Control State.  */
         /* VECTACTIVE */
-        cpu = ARM_CPU(current_cpu);
         val = cpu->env.v7m.exception;
         if (val == 1023) {
             val = 0;
@@ -218,7 +217,6 @@ static uint32_t nvic_readl(nvic_state *s, uint32_t offset)
             val |= (1 << 31);
         return val;
     case 0xd08: /* Vector Table Offset.  */
-        cpu = ARM_CPU(current_cpu);
         return cpu->env.v7m.vecbase;
     case 0xd0c: /* Application Interrupt/Reset Control.  */
         return 0xfa050000;
@@ -292,7 +290,7 @@ static uint32_t nvic_readl(nvic_state *s, uint32_t offset)
 
 static void nvic_writel(nvic_state *s, uint32_t offset, uint32_t value)
 {
-    ARMCPU *cpu;
+    ARMCPU *cpu = s->cpu;
     uint32_t oldval;
     switch (offset) {
     case 0x10: /* SysTick Control and Status.  */
@@ -345,7 +343,6 @@ static void nvic_writel(nvic_state *s, uint32_t offset, uint32_t value)
         }
         break;
     case 0xd08: /* Vector Table Offset.  */
-        cpu = ARM_CPU(current_cpu);
         cpu->env.v7m.vecbase = value & 0xffffff80;
         break;
     case 0xd0c: /* Application Interrupt/Reset Control.  */
@@ -491,6 +488,7 @@ static void armv7m_nvic_realize(DeviceState *dev, Error **errp)
     NVICClass *nc = NVIC_GET_CLASS(s);
     Error *local_err = NULL;
 
+    s->cpu = ARM_CPU(first_cpu);
     /* The NVIC always has only one CPU */
     s->gic.num_cpu = 1;
     /* Tell the common code we're an NVIC */
@@ -499,6 +497,7 @@ static void armv7m_nvic_realize(DeviceState *dev, Error **errp)
     nc->parent_realize(dev, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
+
         return;
     }
     gic_init_irqs_and_distributor(&s->gic);
