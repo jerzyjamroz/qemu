@@ -409,7 +409,9 @@ static void nvic_writel(nvic_state *s, uint32_t offset, uint32_t value)
                       "NVIC: Aux fault status registers unimplemented\n");
         break;
     case 0xf00: /* Software Triggered Interrupt Register */
-        if ((value & 0x1ff) < s->num_irq) {
+        /* STIR write allowed if privlaged or USERSETMPEND set */
+        if ((arm_current_el(&cpu->env) || (cpu->env.v7m.ccr & CCR_USERSETMPEND))
+            && ((value & 0x1ff) < 496)) {
             gic_set_pending_private(&s->gic, 0, value & 0x1ff);
         }
         break;
