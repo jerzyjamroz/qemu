@@ -1250,8 +1250,10 @@ static void stellaris_init(const char *kernel_filename, const char *cpu_model,
     vmstate_register_ram_global(sram);
     memory_region_add_subregion(system_memory, 0x20000000, sram);
 
-    nvic = armv7m_init(system_memory, flash_size, NUM_IRQ_LINES,
-                      kernel_filename, cpu_model);
+    armv7m_init(cpu_model);
+    nvic = DEVICE(object_resolve_path("/machine/nvic", NULL));
+    qdev_prop_set_uint32(nvic, "num-irq", NUM_IRQ_LINES);
+    armv7m_realize(flash_size, kernel_filename);
 
     qdev_connect_gpio_out_named(nvic, "SYSRESETREQ", 0,
                                 qemu_allocate_irq(&do_sys_reset, NULL, 0));
