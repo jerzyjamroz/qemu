@@ -5761,10 +5761,35 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         break;
     case EXCP_PREFETCH_ABORT:
     case EXCP_DATA_ABORT:
-        /* TODO: if we implemented the MPU registers, this is where we
-         * should set the MMFAR, etc from exception.fsr and exception.vaddress.
-         */
-        armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
+        switch (env->exception.fsr & 0xf) {
+        case 0x8: /* External Abort */
+            switch (cs->exception_index) {
+            case EXCP_PREFETCH_ABORT:
+                env->v7m.cfsr |= CFSR_PRECISERR;
+                break;
+            case EXCP_DATA_ABORT:
+                env->v7m.cfsr |= CFSR_IBUSERR;
+                break;
+            }
+            armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_BUS);
+            env->v7m.bfar = env->exception.vaddress;
+            env->v7m.cfsr |= CFSR_BFARVALID;
+            break;
+        case 0xd: /* Permission fault */
+        default:
+            switch (cs->exception_index) {
+            case EXCP_PREFETCH_ABORT:
+                env->v7m.cfsr |= CFSR_IACCVIOL;
+                break;
+            case EXCP_DATA_ABORT:
+                env->v7m.cfsr |= CFSR_DACCVIOL;
+                break;
+            }
+            armv7m_nvic_set_pending(env->nvic, ARMV7M_EXCP_MEM);
+            env->v7m.mmfar = env->exception.vaddress;
+            env->v7m.cfsr |= CFSR_MMARVALID;
+            break;
+        }
         break;
     case EXCP_BKPT:
         if (semihosting_enabled()) {
