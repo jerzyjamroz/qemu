@@ -5707,7 +5707,7 @@ void arm_v7m_cpu_do_interrupt(CPUState *cs)
         return; /* Never happens.  Keep compiler happy.  */
     }
 
-    env->v7m.exception = armv7m_nvic_acknowledge_irq(env->nvic);
+    armv7m_nvic_acknowledge_irq(env->nvic);
 
     qemu_log_mask(CPU_LOG_INT, "... as %d\n", env->v7m.exception);
 
