@@ -161,13 +161,6 @@ static void armv7m_bitband_init(void)
 
 /* Board init.  */
 
-static void armv7m_reset(void *opaque)
-{
-    ARMCPU *cpu = opaque;
-
-    cpu_reset(CPU(cpu));
-}
-
 void armv7m_init(const char *cpu_model)
 {
     ARMCPU *cpu;
@@ -209,9 +202,6 @@ void armv7m_realize(int mem_size, const char *kernel_filename)
     int big_endian;
     MemoryRegion *hack = g_new(MemoryRegion, 1);
 
-    qdev_init_nofail(DEVICE(cpu));
-    qdev_init_nofail(nvic);
-
 #ifdef TARGET_WORDS_BIGENDIAN
     big_endian = 1;
 #else
@@ -243,7 +233,11 @@ void armv7m_realize(int mem_size, const char *kernel_filename)
     vmstate_register_ram_global(hack);
     memory_region_add_subregion(get_system_memory(), 0xfffff000, hack);
 
-    qemu_register_reset(armv7m_reset, cpu);
+    /* Realizing cpu calls cpu_reset(), which must have rom image
+     * already mapped to find the correct entry point.
+     */
+    qdev_init_nofail(DEVICE(cpu));
+    qdev_init_nofail(nvic);
 }
 
 static Property bitband_properties[] = {
