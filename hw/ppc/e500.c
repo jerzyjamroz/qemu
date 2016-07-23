@@ -890,6 +890,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
 
     /* General Utility device */
     dev = qdev_create(NULL, "mpc8544-guts");
+    qdev_prop_set_uint32(dev, "porpllsr", params->porpllsr);
     qdev_init_nofail(dev);
     s = SYS_BUS_DEVICE(dev);
     memory_region_add_subregion(ccsr_addr_space, MPC8544_UTIL_OFFSET,

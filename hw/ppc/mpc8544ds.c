@@ -39,6 +39,7 @@ static void mpc8544ds_init(MachineState *machine)
         .pci_mmio_bus_base = 0xC0000000ULL,
         .pci_pio_base = 0xE1000000ULL,
         .spin_base = 0xEF000000ULL,
+        .porpllsr = 0, /* TODO missing valid value */
         .decrementor_freq = 400000000,
     };
 
