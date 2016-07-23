@@ -40,6 +40,7 @@ static void mpc8544ds_init(MachineState *machine)
         .pci_mmio_bus_base = 0xC0000000ULL,
         .pci_pio_base = 0xE1000000ULL,
         .spin_base = 0xEF000000ULL,
+        .decrementor_freq = 400000000,
     };
 
     if (machine->ram_size > 0xc0000000) {
