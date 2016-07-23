@@ -1,1 +1,7 @@
 # See docs/devel/tracing.txt for syntax documentation.
+
+# hw/i2c/mpc8540_i2c.c
+mpc8540_i2c_event(const char *evt) "Bus Event %s"
+mpc8540_i2c_address(uint8_t addr, const char direction) "Address device 0x%02x for %cX"
+mpc8540_i2c_write(uint8_t byte) "Write 0x%02x"
+mpc8540_i2c_read(uint8_t byte) "Read 0x%02x"
