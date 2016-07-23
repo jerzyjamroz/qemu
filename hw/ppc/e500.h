@@ -22,6 +22,9 @@ typedef struct PPCE500Params {
     hwaddr pci_mmio_base;
     hwaddr pci_mmio_bus_base;
     hwaddr spin_base;
+    uint32_t decrementor_freq; /* in Hz */
+    bool skip_load;
+    bool tsec_nic;
 } PPCE500Params;
 
 void ppce500_init(MachineState *machine, PPCE500Params *params);

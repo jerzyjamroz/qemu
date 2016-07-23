@@ -839,7 +839,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
         env->mpic_iack = params->ccsrbar_base +
                          MPC8544_MPIC_REGS_OFFSET + 0xa0;
 
-        ppc_booke_timers_init(cpu, 400000000, PPC_TIMER_E500);
+        ppc_booke_timers_init(cpu, params->decrementor_freq, PPC_TIMER_E500);
 
         /* Register reset handler */
         if (!i) {
@@ -912,7 +912,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     if (!pci_bus)
         printf("couldn't create PCI controller!\n");
 
-    if (pci_bus) {
+    if (pci_bus && !params->tsec_nic) {
         /* Register network interfaces. */
         for (i = 0; i < nb_nics; i++) {
             pci_nic_init_nofail(&nd_table[i], pci_bus, "virtio", NULL);
@@ -959,6 +959,10 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
         memory_region_add_subregion(address_space_mem,
                                     params->platform_bus_base,
                                     sysbus_mmio_get_region(s, 0));
+    }
+
+    if (params->skip_load) {
+        return;
     }
 
     /* Load kernel. */
