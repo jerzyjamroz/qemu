@@ -475,6 +475,33 @@ static void mvme3100_init(MachineState *machine)
     /* the actual PLX bridge doesn't emit interrupts */
     pci_set_byte(PCI_DEVICE(dev)->config + PCI_INTERRUPT_PIN, 0);
 
+    /* The onboard PCI devices (bus 0) have an arbitary IRQ mapping.
+     * The TSI18 is a single function devices which uses all 4 IRQ pins
+     * QEMU doesn't support this.
+     * so we work around this by doing the routing ourselves
+     */
+    if (object_class_by_name("tsi148")) {
+        PCIDevice *pdev;
+
+        pdev = pci_create_multifunction(pci0, PCI_DEVFN(0x11, 0),
+                                        false, "tsi148");
+        dev = DEVICE(pdev);
+
+        qdev_connect_gpio_out_named(dev, "IRQ", 0,
+                                    qdev_get_gpio_in(DEVICE(pic), 0));
+        qdev_connect_gpio_out_named(dev, "IRQ", 1,
+                                    qdev_get_gpio_in(DEVICE(pic), 1));
+        qdev_connect_gpio_out_named(dev, "IRQ", 2,
+                                    qdev_get_gpio_in(DEVICE(pic), 2));
+        qdev_connect_gpio_out_named(dev, "IRQ", 3,
+                                    qdev_get_gpio_in(DEVICE(pic), 3));
+
+        qdev_init_nofail(dev);
+    } else {
+        printf("Unable to add tsi148 vme bridge"
+               " (qemu built w/o TSI148 emulation)\n");
+    }
+
     /* root bus is only home to soldered devices, and has a
      * an arbitrary IRQ pin mapping.
      * Don't allow qdev_device_add() to consider it.
