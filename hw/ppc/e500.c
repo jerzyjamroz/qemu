@@ -859,10 +859,9 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     dev = qdev_create(NULL, "e500-ccsr");
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
+    qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
-    memory_region_add_subregion(address_space_mem, params->ccsrbar_base,
-                                ccsr_addr_space);
 
     mpicdev = ppce500_init_mpic(machine, params, ccsr_addr_space, irqs);
 
@@ -1052,10 +1051,20 @@ typedef struct PPCE500CCSRState {
     /*< public >*/
 
     MemoryRegion ccsr_space;
+
+    uint32_t defbase, base;
 } PPCE500CCSRState;
 
 #define TYPE_CCSR "e500-ccsr"
 #define CCSR(obj) OBJECT_CHECK(PPCE500CCSRState, (obj), TYPE_CCSR)
+
+static void e500_ccsr_reset(DeviceState *dev)
+{
+    PPCE500CCSRState *ccsr = CCSR(dev);
+
+    ccsr->base = ccsr->defbase;
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, ccsr->base);
+}
 
 static int e500_ccsr_initfn(SysBusDevice *dev)
 {
@@ -1068,9 +1077,28 @@ static int e500_ccsr_initfn(SysBusDevice *dev)
     return 0;
 }
 
+static Property e500_ccsr_properties[] = {
+    DEFINE_PROP_UINT32("base", PPCE500CCSRState, defbase, 0xff700000),
+    DEFINE_PROP_END_OF_LIST()
+};
+
+static const VMStateDescription vmstate_e500_ccsr = {
+    .name = "e500_ccsr",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(base, PPCE500CCSRState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void e500_ccsr_class_init(ObjectClass *klass, void *data)
 {
+    DeviceClass *dc = DEVICE_CLASS(klass);
     SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->props = e500_ccsr_properties;
+    dc->vmsd = &vmstate_e500_ccsr;
+    dc->reset = e500_ccsr_reset;
     k->init = e500_ccsr_initfn;
 }
 
