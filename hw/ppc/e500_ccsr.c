@@ -31,6 +31,7 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/kvm.h"
 #include "hw/sysbus.h"
+#include "hw/char/serial.h"
 #include "hw/ppc/openpic.h"
 
 /* E500_ denotes registers common to all */
@@ -44,6 +45,8 @@
 
 #define E500_ERR_DETECT  (0x2e40)
 #define E500_ERR_DISABLE (0x2e44)
+
+#define E500_DUART_OFFSET(N) (0x4500 + (N) * 0x100)
 
 #define E500_PORPLLSR    (0xE0000)
 #define E500_PVR         (0xE00A0)
@@ -266,6 +269,21 @@ static void e500_ccsr_realize(DeviceState *dev, Error **errp)
 
     memory_region_add_subregion(&ccsr->iomem, E500_MPIC_OFFSET,
                                 sysbus_mmio_get_region(pic, 0));
+    /* Note: MPIC internal interrupts are offset by 16 */
+
+    /* DUARTS */
+    if (serial_hds[0]) {
+        serial_mm_init(&ccsr->iomem, E500_DUART_OFFSET(0),
+                       0, qdev_get_gpio_in(ccsr->pic, 16 + 26), 399193,
+                       serial_hds[0], DEVICE_BIG_ENDIAN);
+    }
+
+    if (serial_hds[1]) {
+        serial_mm_init(&ccsr->iomem, E500_DUART_OFFSET(1),
+                       0, qdev_get_gpio_in(ccsr->pic, 16 + 26), 399193,
+                       serial_hds[1], DEVICE_BIG_ENDIAN);
+    }
+
 }
 
 static Property e500_ccsr_props[] = {

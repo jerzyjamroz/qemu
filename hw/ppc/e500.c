@@ -22,7 +22,6 @@
 #include "net/net.h"
 #include "qemu/config-file.h"
 #include "hw/hw.h"
-#include "hw/char/serial.h"
 #include "hw/pci/pci.h"
 #include "hw/boards.h"
 #include "sysemu/sysemu.h"
@@ -770,18 +769,6 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     mpicdev = DEVICE(object_resolve_path("/machine/pic", 0));
     assert(mpicdev);
 
-    /* Serial */
-    if (serial_hds[0]) {
-        serial_mm_init(ccsr_addr_space, MPC8544_SERIAL0_REGS_OFFSET,
-                       0, qdev_get_gpio_in(mpicdev, 42), 399193,
-                       serial_hds[0], DEVICE_BIG_ENDIAN);
-    }
-
-    if (serial_hds[1]) {
-        serial_mm_init(ccsr_addr_space, MPC8544_SERIAL1_REGS_OFFSET,
-                       0, qdev_get_gpio_in(mpicdev, 42), 399193,
-                       serial_hds[1], DEVICE_BIG_ENDIAN);
-    }
 
     /* PCI */
     dev = qdev_create(NULL, "e500-pcihost");
