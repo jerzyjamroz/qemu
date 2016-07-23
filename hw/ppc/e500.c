@@ -862,6 +862,14 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
+    dev = qdev_create(NULL, "mpc8540-i2c");
+    object_property_add_child(qdev_get_machine(), "i2c[*]",
+                              OBJECT(dev), NULL);
+    qdev_init_nofail(dev);
+    s = SYS_BUS_DEVICE(dev);
+    memory_region_add_subregion(ccsr_addr_space, 0x3000,
+                                sysbus_mmio_get_region(s, 0));
+
     mpicdev = ppce500_init_mpic(machine, params, ccsr_addr_space, irqs);
 
     /* Serial */
