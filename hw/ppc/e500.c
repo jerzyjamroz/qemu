@@ -854,6 +854,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
     qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
+    qdev_prop_set_uint32(dev, "ram-size", ram_size);
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
@@ -1047,6 +1048,8 @@ typedef struct PPCE500CCSRState {
     MemoryRegion ccsr_space, ccsr_core;
 
     uint32_t defbase, base;
+    uint32_t ram_size;
+    uint32_t merrd;
 } PPCE500CCSRState;
 
 #define TYPE_CCSR "e500-ccsr"
@@ -1067,13 +1070,27 @@ uint64_t ccsr_core_read(void *opaque, hwaddr addr, unsigned size)
     switch (addr) {
     case 0: /* CCSRBAR */
         return ccsr->base >> 12;
-    case 8:
-    case 0x10:
-    case 0x20:
-        qemu_log_mask(LOG_UNIMP, "ALTCBAR, ALTCAR, and BPTR not implemented");
+    case 0x2000: /* CSx_BNDS */
+        /* we model all RAM in a single chip with addresses [0, ram_size) */
+        return (ccsr->ram_size - 1) >> 24;
+    case 0x2008:
+    case 0x2010:
+    case 0x2018:
         return 0;
+    case 0x2080: /* CSx_CONFIG */
+        return 1 << 31;
+        break;
+    case 0x2084:
+    case 0x2088:
+    case 0x208c:
+    case 0x2e40: /* Memory Error detect (errors not modeled) */
+        return 0;
+        break;
+    case 0x2e44: /* Memory Error disable */
+        return ccsr->merrd;
+        break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR, "undefined ccsr regster %x\n",
+        qemu_log_mask(LOG_GUEST_ERROR, "can't read undefined ccsr regster %x\n",
                       (unsigned)addr);
         return 0;
     }
@@ -1089,13 +1106,24 @@ void ccsr_core_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
         ccsr->base = val << 12;
         sysbus_mmio_map(SYS_BUS_DEVICE(ccsr), 0, ccsr->base);
         break;
-    case 8:
-    case 0x10:
-    case 0x20:
-        qemu_log_mask(LOG_UNIMP, "ALTCBAR, ALTCAR, and BPTR not implemented");
+    case 0x2000: /* CSx_BNDS */
+    case 0x2008:
+    case 0x2010:
+    case 0x2018:
+    case 0x2080: /* CSx_CONFIG */
+    case 0x2084:
+    case 0x2088:
+    case 0x208c:
+        qemu_log_mask(LOG_UNIMP, "DRAM re-configuration not implemented\n");
+        break;
+    case 0x2e40:
+        break;
+    case 0x2e44: /* Memory Error disable */
+        ccsr->merrd = val & 0xd;
         break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR, "undefined ccsr regster %x\n",
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "can't write undefined ccsr regster %x\n",
                       (unsigned)addr);
     }
 }
@@ -1117,12 +1145,13 @@ static void e500_ccsr_initfn(Object *obj)
                        MPC8544_CCSRBAR_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &ccsr->ccsr_space);
     memory_region_init_io(&ccsr->ccsr_core, obj, &ccsr_core_ops,
-                          ccsr, "ccsr-core", 0x24);
+                          ccsr, "ccsr-core", 0x2e60);
     memory_region_add_subregion(&ccsr->ccsr_space, 0, &ccsr->ccsr_core);
 }
 
 static Property e500_ccsr_properties[] = {
     DEFINE_PROP_UINT32("base", PPCE500CCSRState, defbase, 0xff700000),
+    DEFINE_PROP_UINT32("ram-size", PPCE500CCSRState, ram_size, 0),
     DEFINE_PROP_END_OF_LIST()
 };
 
@@ -1132,6 +1161,8 @@ static const VMStateDescription vmstate_e500_ccsr = {
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
         VMSTATE_UINT32(base, PPCE500CCSRState),
+        VMSTATE_UINT32(ram_size, PPCE500CCSRState),
+        VMSTATE_UINT32(merrd, PPCE500CCSRState),
         VMSTATE_END_OF_LIST()
     }
 };
