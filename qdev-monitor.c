@@ -25,6 +25,7 @@
 #include "qmp-commands.h"
 #include "sysemu/arch_init.h"
 #include "qapi/qmp/qerror.h"
+#include "qom/cpu.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
 #include "qemu/help_option.h"
@@ -718,7 +719,6 @@ static void qbus_print(Monitor *mon, BusState *bus, int indent)
         qdev_print(mon, dev, indent);
     }
 }
-#undef qdev_printf
 
 void hmp_info_qtree(Monitor *mon, const QDict *qdict)
 {
@@ -730,6 +730,95 @@ void hmp_info_qdm(Monitor *mon, const QDict *qdict)
 {
     qdev_print_devinfos(true);
 }
+
+static int ginfo_predev(DeviceState *dev, void *opaque)
+{
+    int indent = 0;
+    Monitor *mon = opaque;
+    NamedGPIOList *ngl;
+
+    if(!dev->gpios.lh_first)
+        return 0; /* skip devices w/o gpios */
+
+    qdev_printf("dev: %s, id \"%s\", path %s\n",
+                object_get_typename(OBJECT(dev)),
+                dev->id ? dev->id : "",
+                object_get_canonical_path(OBJECT(dev)));
+
+    indent += 2;
+    QLIST_FOREACH(ngl, &dev->gpios, node) {
+        if(ngl->num_in) {
+            qdev_printf("gpio-in \"%s\" %d\n", ngl->name ? ngl->name : "",
+                        ngl->num_in);
+        }
+        if(ngl->num_out) {
+            int i;
+            qdev_printf("gpio-out \"%s\" %d\n", ngl->name ? ngl->name : "",
+                        ngl->num_out);
+            indent += 2;
+            for(i=0; i<ngl->num_out; i++)
+            {
+                qemu_irq irq = qdev_get_gpio_out_connector(dev, ngl->name, i);
+                if(irq) {
+                    qdev_printf("[%d] -> %s\n", i,
+                                object_get_canonical_path(OBJECT(irq)));
+                }
+            }
+            indent -= 2;
+        }
+    }
+
+    indent -= 2;
+    return 0;
+}
+
+static int ginfo_gpio(Object *child, void *opaque)
+{
+    int indent = 2;
+    Monitor *mon = opaque;
+    if(strcmp(object_get_typename(child), TYPE_IRQ)==0) {
+        qdev_printf("%s\n", object_get_canonical_path(child));
+    }
+    return 0;
+}
+
+/* Show the association be between GPIO inputs and outputs.
+ *
+ * Inputs (sinks, slots, ...) are instances of IRQState (an Object), and
+ * are parent'd to a device by qdev_get_gpio_in*()
+ * or /machine/unattached if found un-parented by
+ * qdev_connect_gpio_out_named().
+ *
+ * Outputs (sources, signals, ...) are IRQState*, locations where a pointer
+ * can be stored (by qdev_connect_gpio_out_named()).
+ * Unconnected outputs are NULL.
+ * Outputs are always associated with a Device
+ */
+void hmp_info_gpio(Monitor *mon, const QDict *qdict)
+{
+    int idx = 0, indent = 0;
+    if(!sysbus_get_default())
+        return;
+
+    qdev_printf("CPUS:\n");
+    while(1) {
+        CPUState *cpu = qemu_get_cpu(idx++);
+        if(!cpu)
+            break;
+        ginfo_predev(DEVICE(cpu), mon);
+    }
+
+    /* find inputs and outputs associated with a device in the bus heirarchy */
+    qdev_printf("Bus devices:\n");
+    qbus_walk_children(sysbus_get_default(), &ginfo_predev, NULL,
+                       NULL, NULL, mon);
+
+    qdev_printf("Unattached gpio-in:\n");
+
+    object_child_foreach(container_get(qdev_get_machine(), "/unattached"),
+                         &ginfo_gpio, mon);
+}
+#undef qdev_printf
 
 typedef struct QOMCompositionState {
     Monitor *mon;
