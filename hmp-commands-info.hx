@@ -622,6 +622,19 @@ Show QOM composition tree.
 ETEXI
 
     {
+        .name       = "gpios",
+        .args_type  = "",
+        .params     = "",
+        .help       = "Show GPIO connections",
+        .cmd = hmp_info_gpio,
+    },
+STEXI
+@item info gpios
+@findex gpios
+Show GPIO connections
+ETEXI
+
+    {
         .name       = "roms",
         .args_type  = "",
         .params     = "",
