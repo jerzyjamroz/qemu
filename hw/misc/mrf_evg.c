@@ -19,6 +19,9 @@
  */
 
 
+#include "qemu/osdep.h"
+#include "qemu/log.h"
+#include "qapi/error.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "sysemu/char.h"
@@ -51,7 +54,7 @@ typedef struct {
     /*< private >*/
     SysBusDevice parent_obj;
 
-    CharDriverState *chr; /* event link */
+    CharBackend chr; /* event link */
 
     MemoryRegion evg;
 
@@ -99,7 +102,7 @@ void link_send(EVGState *d, const uint8_t *buf, size_t blen)
         return; /* success when noting to send */
 
     /* TODO non-blocking I/O or cothread? */
-    ret = qemu_chr_fe_write_all(d->chr, buf, blen);
+    ret = qemu_chr_fe_write_all(&d->chr, buf, blen);
     if(ret==-1) {
         WRNOUT("link send fails %d\n", ret);
         return ;
@@ -400,9 +403,7 @@ static int mrf_evg_init(SysBusDevice *sdev)
 
     object_property_add_bool(OBJECT(sdev), "endian", &evg_get_endian, &evg_set_endian, &error_abort);
 
-    if(d->chr) {
-        qemu_chr_add_handlers(d->chr, chr_link_can_read, chr_link_read, chr_link_event, d);
-    }
+    qemu_chr_fe_set_handlers(&d->chr, chr_link_can_read, chr_link_read, chr_link_event, d, NULL, true);
 
     return 0;
 }

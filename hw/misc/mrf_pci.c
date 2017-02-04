@@ -19,6 +19,9 @@
  */
 
 
+#include "qemu/osdep.h"
+#include "qemu/log.h"
+#include "qapi/error.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "hw/pci/pci.h"
@@ -49,7 +52,7 @@
 typedef struct MRFPCIState {
     PCIDevice parent_obj;
 
-    CharDriverState *chr; /* event link */
+    CharBackend chr; /* event link */
 
     MemoryRegion plx;
 
@@ -158,10 +161,8 @@ static int mrf_pci_init(PCIDevice *pci_dev)
 
     object_property_add_child(OBJECT(pci_dev), "core", OBJECT(dev), &error_abort);
 
-    if(d->chr) {
-        qemu_chr_fe_release(d->chr);
-        qdev_prop_set_chr(dev, "chardev", d->chr);
-    }
+    qdev_prop_set_chr(dev, "chardev", d->chr.chr);
+
     qdev_prop_set_uint8(dev, "mrf-type", k->info->mrf_type);
     qdev_prop_set_uint8(dev, "version", d->fwversion);
 
