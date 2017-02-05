@@ -29,4 +29,7 @@ I2CAdapter *omap_i2c_create(uint64_t addr);
 /* libi2c-imx.c */
 I2CAdapter *imx_i2c_create(uint64_t addr);
 
+/* i2c-e500.c */
+I2CAdapter *e500_i2c_create(uint64_t ccsr_base);
+
 #endif

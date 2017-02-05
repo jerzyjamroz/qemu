@@ -15,10 +15,10 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "e500.h"
-#include "e500-ccsr.h"
 #include "net/net.h"
 #include "qemu/config-file.h"
 #include "hw/hw.h"
@@ -689,6 +689,8 @@ static DeviceState *ppce500_init_mpic_qemu(PPCE500Params *params,
     int i, j, k;
 
     dev = qdev_create(NULL, TYPE_OPENPIC);
+    object_property_add_child(qdev_get_machine(), "pic", OBJECT(dev),
+                              &error_fatal);
     qdev_prop_set_uint32(dev, "model", params->mpic_version);
     qdev_prop_set_uint32(dev, "nb_cpus", smp_cpus);
 
@@ -733,15 +735,13 @@ static DeviceState *ppce500_init_mpic_kvm(PPCE500Params *params,
     return dev;
 }
 
-static qemu_irq *ppce500_init_mpic(MachineState *machine, PPCE500Params *params,
-                                   MemoryRegion *ccsr, qemu_irq **irqs)
+static DeviceState *ppce500_init_mpic(MachineState *machine,
+                                      PPCE500Params *params,
+                                      MemoryRegion *ccsr,
+                                      qemu_irq **irqs)
 {
-    qemu_irq *mpic;
     DeviceState *dev = NULL;
     SysBusDevice *s;
-    int i;
-
-    mpic = g_new0(qemu_irq, 256);
 
     if (kvm_enabled()) {
         Error *err = NULL;
@@ -760,15 +760,11 @@ static qemu_irq *ppce500_init_mpic(MachineState *machine, PPCE500Params *params,
         dev = ppce500_init_mpic_qemu(params, irqs);
     }
 
-    for (i = 0; i < 256; i++) {
-        mpic[i] = qdev_get_gpio_in(dev, i);
-    }
-
     s = SYS_BUS_DEVICE(dev);
     memory_region_add_subregion(ccsr, MPC8544_MPIC_REGS_OFFSET,
                                 s->mmio[0].memory);
 
-    return mpic;
+    return dev;
 }
 
 static void ppce500_power_off(void *opaque, int line, int on)
@@ -800,12 +796,11 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     /* irq num for pin INTA, INTB, INTC and INTD is 1, 2, 3 and
      * 4 respectively */
     unsigned int pci_irq_nrs[PCI_NUM_PINS] = {1, 2, 3, 4};
-    qemu_irq **irqs, *mpic;
-    DeviceState *dev;
+    qemu_irq **irqs;
+    DeviceState *dev, *mpicdev;
     CPUPPCState *firstenv = NULL;
     MemoryRegion *ccsr_addr_space;
     SysBusDevice *s;
-    PPCE500CCSRState *ccsr;
 
     /* Setup CPUs */
     if (machine->cpu_model == NULL) {
@@ -839,7 +834,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
         env->mpic_iack = params->ccsrbar_base +
                          MPC8544_MPIC_REGS_OFFSET + 0xa0;
 
-        ppc_booke_timers_init(cpu, 400000000, PPC_TIMER_E500);
+        ppc_booke_timers_init(cpu, params->decrementor_freq, PPC_TIMER_E500);
 
         /* Register reset handler */
         if (!i) {
@@ -867,29 +862,37 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     dev = qdev_create(NULL, "e500-ccsr");
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
+    qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
+    qdev_prop_set_uint32(dev, "ram-size", ram_size);
     qdev_init_nofail(dev);
-    ccsr = CCSR(dev);
-    ccsr_addr_space = &ccsr->ccsr_space;
-    memory_region_add_subregion(address_space_mem, params->ccsrbar_base,
-                                ccsr_addr_space);
+    ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
-    mpic = ppce500_init_mpic(machine, params, ccsr_addr_space, irqs);
+    dev = qdev_create(NULL, "mpc8540-i2c");
+    object_property_add_child(qdev_get_machine(), "i2c[*]",
+                              OBJECT(dev), NULL);
+    qdev_init_nofail(dev);
+    s = SYS_BUS_DEVICE(dev);
+    memory_region_add_subregion(ccsr_addr_space, 0x3000,
+                                sysbus_mmio_get_region(s, 0));
+
+    mpicdev = ppce500_init_mpic(machine, params, ccsr_addr_space, irqs);
 
     /* Serial */
     if (serial_hds[0]) {
         serial_mm_init(ccsr_addr_space, MPC8544_SERIAL0_REGS_OFFSET,
-                       0, mpic[42], 399193,
+                       0, qdev_get_gpio_in(mpicdev, 42), 399193,
                        serial_hds[0], DEVICE_BIG_ENDIAN);
     }
 
     if (serial_hds[1]) {
         serial_mm_init(ccsr_addr_space, MPC8544_SERIAL1_REGS_OFFSET,
-                       0, mpic[42], 399193,
+                       0, qdev_get_gpio_in(mpicdev, 42), 399193,
                        serial_hds[1], DEVICE_BIG_ENDIAN);
     }
 
     /* General Utility device */
     dev = qdev_create(NULL, "mpc8544-guts");
+    qdev_prop_set_uint32(dev, "porpllsr", params->porpllsr);
     qdev_init_nofail(dev);
     s = SYS_BUS_DEVICE(dev);
     memory_region_add_subregion(ccsr_addr_space, MPC8544_UTIL_OFFSET,
@@ -897,12 +900,14 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
 
     /* PCI */
     dev = qdev_create(NULL, "e500-pcihost");
+    object_property_add_child(qdev_get_machine(), "pci-host", OBJECT(dev),
+                              &error_abort);
     qdev_prop_set_uint32(dev, "first_slot", params->pci_first_slot);
     qdev_prop_set_uint32(dev, "first_pin_irq", pci_irq_nrs[0]);
     qdev_init_nofail(dev);
     s = SYS_BUS_DEVICE(dev);
     for (i = 0; i < PCI_NUM_PINS; i++) {
-        sysbus_connect_irq(s, i, mpic[pci_irq_nrs[i]]);
+        sysbus_connect_irq(s, i, qdev_get_gpio_in(mpicdev, pci_irq_nrs[i]));
     }
 
     memory_region_add_subregion(ccsr_addr_space, MPC8544_PCI_REGS_OFFSET,
@@ -912,7 +917,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     if (!pci_bus)
         printf("couldn't create PCI controller!\n");
 
-    if (pci_bus) {
+    if (pci_bus && !params->tsec_nic) {
         /* Register network interfaces. */
         for (i = 0; i < nb_nics; i++) {
             pci_nic_init_nofail(&nd_table[i], pci_bus, "virtio", NULL);
@@ -933,7 +938,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
         dev = qdev_create(NULL, "mpc8xxx_gpio");
         s = SYS_BUS_DEVICE(dev);
         qdev_init_nofail(dev);
-        sysbus_connect_irq(s, 0, mpic[MPC8XXX_GPIO_IRQ]);
+        sysbus_connect_irq(s, 0, qdev_get_gpio_in(mpicdev, MPC8XXX_GPIO_IRQ));
         memory_region_add_subregion(ccsr_addr_space, MPC8XXX_GPIO_OFFSET,
                                     sysbus_mmio_get_region(s, 0));
 
@@ -953,12 +958,16 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
 
         for (i = 0; i < params->platform_bus_num_irqs; i++) {
             int irqn = params->platform_bus_first_irq + i;
-            sysbus_connect_irq(s, i, mpic[irqn]);
+            sysbus_connect_irq(s, i, qdev_get_gpio_in(mpicdev, irqn));
         }
 
         memory_region_add_subregion(address_space_mem,
                                     params->platform_bus_base,
                                     sysbus_mmio_get_region(s, 0));
+    }
+
+    if (params->skip_load) {
+        return;
     }
 
     /* Load kernel. */
@@ -1049,6 +1058,105 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     boot_info->dt_size = dt_size;
 }
 
+
+typedef struct PPCE500CCSRState {
+    /*< private >*/
+    SysBusDevice parent;
+    /*< public >*/
+
+    MemoryRegion ccsr_space, ccsr_core;
+
+    uint32_t defbase, base;
+    uint32_t ram_size;
+    uint32_t merrd;
+} PPCE500CCSRState;
+
+#define TYPE_CCSR "e500-ccsr"
+#define CCSR(obj) OBJECT_CHECK(PPCE500CCSRState, (obj), TYPE_CCSR)
+
+static void e500_ccsr_reset(DeviceState *dev)
+{
+    PPCE500CCSRState *ccsr = CCSR(dev);
+
+    ccsr->base = ccsr->defbase;
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, ccsr->base);
+}
+
+static
+uint64_t ccsr_core_read(void *opaque, hwaddr addr, unsigned size)
+{
+    PPCE500CCSRState *ccsr = opaque;
+    switch (addr) {
+    case 0: /* CCSRBAR */
+        return ccsr->base >> 12;
+    case 0x2000: /* CSx_BNDS */
+        /* we model all RAM in a single chip with addresses [0, ram_size) */
+        return (ccsr->ram_size - 1) >> 24;
+    case 0x2008:
+    case 0x2010:
+    case 0x2018:
+        return 0;
+    case 0x2080: /* CSx_CONFIG */
+        return 1 << 31;
+        break;
+    case 0x2084:
+    case 0x2088:
+    case 0x208c:
+    case 0x2e40: /* Memory Error detect (errors not modeled) */
+        return 0;
+        break;
+    case 0x2e44: /* Memory Error disable */
+        return ccsr->merrd;
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR, "can't read undefined ccsr regster %x\n",
+                      (unsigned)addr);
+        return 0;
+    }
+}
+
+static
+void ccsr_core_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+{
+    PPCE500CCSRState *ccsr = opaque;
+    switch (addr) {
+    case 0: /* CCSRBAR */
+        val &= 0x000fff00;
+        ccsr->base = val << 12;
+        sysbus_mmio_map(SYS_BUS_DEVICE(ccsr), 0, ccsr->base);
+        break;
+    case 0x2000: /* CSx_BNDS */
+    case 0x2008:
+    case 0x2010:
+    case 0x2018:
+    case 0x2080: /* CSx_CONFIG */
+    case 0x2084:
+    case 0x2088:
+    case 0x208c:
+        qemu_log_mask(LOG_UNIMP, "DRAM re-configuration not implemented\n");
+        break;
+    case 0x2e40:
+        break;
+    case 0x2e44: /* Memory Error disable */
+        ccsr->merrd = val & 0xd;
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "can't write undefined ccsr regster %x\n",
+                      (unsigned)addr);
+    }
+}
+
+static const MemoryRegionOps ccsr_core_ops = {
+    .read = ccsr_core_read,
+    .write = ccsr_core_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+    .impl = {
+        .min_access_size = 4,
+        .max_access_size = 4,
+    }
+};
+
 static int e500_ccsr_initfn(SysBusDevice *dev)
 {
     PPCE500CCSRState *ccsr;
@@ -1056,12 +1164,38 @@ static int e500_ccsr_initfn(SysBusDevice *dev)
     ccsr = CCSR(dev);
     memory_region_init(&ccsr->ccsr_space, OBJECT(ccsr), "e500-ccsr",
                        MPC8544_CCSRBAR_SIZE);
+    memory_region_init_io(&ccsr->ccsr_core, OBJECT(ccsr), &ccsr_core_ops,
+                          ccsr, "ccsr-core", 0x2e60);
+    memory_region_add_subregion(&ccsr->ccsr_space, 0, &ccsr->ccsr_core);
+    sysbus_init_mmio(dev, &ccsr->ccsr_space);
     return 0;
 }
 
+static Property e500_ccsr_properties[] = {
+    DEFINE_PROP_UINT32("base", PPCE500CCSRState, defbase, 0xff700000),
+    DEFINE_PROP_UINT32("ram-size", PPCE500CCSRState, ram_size, 0),
+    DEFINE_PROP_END_OF_LIST()
+};
+
+static const VMStateDescription vmstate_e500_ccsr = {
+    .name = "e500_ccsr",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(base, PPCE500CCSRState),
+        VMSTATE_UINT32(ram_size, PPCE500CCSRState),
+        VMSTATE_UINT32(merrd, PPCE500CCSRState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void e500_ccsr_class_init(ObjectClass *klass, void *data)
 {
+    DeviceClass *dc = DEVICE_CLASS(klass);
     SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->props = e500_ccsr_properties;
+    dc->vmsd = &vmstate_e500_ccsr;
+    dc->reset = e500_ccsr_reset;
     k->init = e500_ccsr_initfn;
 }
 

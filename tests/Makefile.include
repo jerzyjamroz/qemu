@@ -193,6 +193,7 @@ gcov-files-pci-$(CONFIG_VIRTIO_VGA) += hw/display/virtio-vga.c
 check-qtest-pci-y += tests/intel-hda-test$(EXESUF)
 gcov-files-pci-y += hw/audio/intel-hda.c hw/audio/hda-codec.c
 check-qtest-pci-$(CONFIG_EVENTFD) += tests/ivshmem-test$(EXESUF)
+check-qtest-pci-$(CONFIG_TSI148) += tests/tsi148-test$(EXESUF)
 gcov-files-pci-y += hw/misc/ivshmem.c
 
 check-qtest-i386-y = tests/endianness-test$(EXESUF)
@@ -314,6 +315,8 @@ check-qtest-microblazeel-y = $(check-qtest-microblaze-y)
 check-qtest-xtensaeb-y = $(check-qtest-xtensa-y)
 
 check-qtest-s390x-y = tests/boot-serial-test$(EXESUF)
+
+check-qtest-ppc-$(CONFIG_E500) += tests/mvme3100-test$(EXESUF)
 
 check-qtest-generic-y += tests/qom-test$(EXESUF)
 
@@ -639,6 +642,7 @@ libqos-pc-obj-y += tests/libqos/malloc-pc.o tests/libqos/libqos-pc.o
 libqos-pc-obj-y += tests/libqos/ahci.o
 libqos-omap-obj-y = $(libqos-obj-y) tests/libqos/i2c-omap.o
 libqos-imx-obj-y = $(libqos-obj-y) tests/libqos/i2c-imx.o
+libqos-e500-obj-y = $(libqos-obj-y) tests/libqos/i2c-e500.o
 libqos-usb-obj-y = $(libqos-spapr-obj-y) $(libqos-pc-obj-y) tests/libqos/usb.o
 libqos-virtio-obj-y = $(libqos-spapr-obj-y) $(libqos-pc-obj-y) tests/libqos/virtio.o tests/libqos/virtio-pci.o tests/libqos/virtio-mmio.o tests/libqos/malloc-generic.o
 
@@ -696,6 +700,8 @@ tests/i82801b11-test$(EXESUF): tests/i82801b11-test.o
 tests/ac97-test$(EXESUF): tests/ac97-test.o
 tests/es1370-test$(EXESUF): tests/es1370-test.o
 tests/intel-hda-test$(EXESUF): tests/intel-hda-test.o
+tests/mvme3100-test$(EXESUF): tests/mvme3100-test.o $(libqos-e500-obj-y)
+tests/tsi148-test$(EXESUF): tests/tsi148-test.o $(libqos-pc-obj-y)
 tests/ioh3420-test$(EXESUF): tests/ioh3420-test.o
 tests/usb-hcd-ohci-test$(EXESUF): tests/usb-hcd-ohci-test.o $(libqos-usb-obj-y)
 tests/usb-hcd-uhci-test$(EXESUF): tests/usb-hcd-uhci-test.o $(libqos-usb-obj-y)

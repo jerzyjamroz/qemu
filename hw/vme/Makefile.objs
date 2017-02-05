@@ -1,0 +1,2 @@
+common-obj-$(CONFIG_VME) += vme_bus.o vme_test.o
+common-obj-$(CONFIG_TSI148) += tsi148.o

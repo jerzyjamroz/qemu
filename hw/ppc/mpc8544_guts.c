@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
+#include "qemu/log.h"
 #include "cpu.h"
 #include "hw/hw.h"
 #include "sysemu/sysemu.h"
@@ -63,6 +64,8 @@ struct GutsState {
     /*< public >*/
 
     MemoryRegion iomem;
+
+    uint32_t porpllsr;
 };
 
 typedef struct GutsState GutsState;
@@ -70,12 +73,20 @@ typedef struct GutsState GutsState;
 static uint64_t mpc8544_guts_read(void *opaque, hwaddr addr,
                                   unsigned size)
 {
+    GutsState *guts = opaque;
     uint32_t value = 0;
     PowerPCCPU *cpu = POWERPC_CPU(current_cpu);
     CPUPPCState *env = &cpu->env;
 
     addr &= MPC8544_GUTS_MMIO_SIZE - 1;
     switch (addr) {
+    case MPC8544_GUTS_ADDR_PORPLLSR:
+        value = guts->porpllsr;
+        if (!guts->porpllsr) {
+            qemu_log_mask(LOG_UNIMP,
+                          "Machine does not provide valid PORPLLSR\n");
+        }
+        break;
     case MPC8544_GUTS_ADDR_PVR:
         value = env->spr[SPR_PVR];
         break;
@@ -128,11 +139,26 @@ static void mpc8544_guts_initfn(Object *obj)
     sysbus_init_mmio(d, &s->iomem);
 }
 
+static Property mpc8544_guts_props[] = {
+    DEFINE_PROP_UINT32("porpllsr", GutsState, porpllsr, 0),
+    DEFINE_PROP_END_OF_LIST()
+};
+
+static
+void mpc8544_guts_class_initfn(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+
+    dc->props = mpc8544_guts_props;
+}
+
 static const TypeInfo mpc8544_guts_info = {
     .name          = TYPE_MPC8544_GUTS,
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(GutsState),
     .instance_init = mpc8544_guts_initfn,
+    .class_size    = sizeof(SysBusDeviceClass),
+    .class_init    = mpc8544_guts_class_initfn
 };
 
 static void mpc8544_guts_register_types(void)
