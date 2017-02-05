@@ -344,7 +344,7 @@ static void mvme3100_init(MachineState *machine)
      * 0xaa -  8k*8 byte eeprom for VPD of rear expansion card
      */
 
-    if (bios_name) {
+    if (!bios_name) {
         bios_name = "tomload.bin";
     }
 
