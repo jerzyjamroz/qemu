@@ -174,6 +174,15 @@ static void mvme3100_cpu_reset(void *opaque)
     env->nip = 0xfffffffc;
 }
 
+static
+void mvme3100_pci1_set_irq(void *opaque, int irq_num, int level)
+{
+    qemu_irq *pic = opaque;
+
+    printf("mvme3100 pci1 irq %d %d\n", irq_num, level);
+    qemu_set_irq(pic[irq_num], level);
+}
+
 /* PCI config from a real mvme3100 as configured by motload
  *
  *  BUS:SLOT:FUN  VENDOR-DEV_ID: COMMAND STATUS BASE_ADDR0 BASE_ADDR1 IRQ_PIN -> IRQ_LINE
@@ -229,7 +238,9 @@ static void mvme3100_init(MachineState *machine)
     };
     DeviceState *dev;
     BusState *i2c;
+    PCIBus *pci0, *pci1;
     SysBusDevice *cpld, *ccsr, *pic;
+    qemu_irq *pci1_pins = g_malloc_n(4, sizeof(*pci1_pins));
 
     if (!machine->cpu_model) {
         machine->cpu_model = "e500_v20";
@@ -253,6 +264,34 @@ static void mvme3100_init(MachineState *machine)
                                 0xe2000000,
                                 sysbus_mmio_get_region(cpld, 0));
 
+    dev = DEVICE(object_resolve_path("/machine/pci-host", NULL));
+    assert(dev);
+    pci0 = PCI_BUS(qdev_get_child_bus(dev, "pci.0"));
+    assert(pci0);
+
+    /* Add expansion PCI bus (2x PMC sites)
+     * "pci-bridge" is not a PLX bridge, but shouldn't matter?
+     */
+    dev = qdev_create(BUS(pci0), "pci-bridge");
+
+    qdev_prop_set_uint8(dev, "chassis_nr", 1);
+    qdev_prop_set_int32(dev, "addr", PCI_DEVFN(0x12, 0));
+
+    qdev_init_nofail(dev);
+
+    pci1 = PCI_BUS(qdev_get_child_bus(dev, "pci.1"));
+    assert(pci1);
+
+    pci1_pins[0] = qdev_get_gpio_in(DEVICE(pic), 4);
+    pci1_pins[1] = qdev_get_gpio_in(DEVICE(pic), 5);
+    pci1_pins[2] = qdev_get_gpio_in(DEVICE(pic), 6);
+    pci1_pins[3] = qdev_get_gpio_in(DEVICE(pic), 7);
+
+    pci_bus_irqs(pci1, mvme3100_pci1_set_irq, pci_swizzle_map_irq_fn, pci1_pins, 4);
+
+    /* the actual PLX bridge doesn't emit interrupts */
+    pci_set_byte(PCI_DEVICE(dev)->config + PCI_INTERRUPT_PIN, 0);
+
     /* I2C Controller */
     dev = DEVICE(object_resolve_path("/machine/i2c[0]", NULL));
     assert(dev);
@@ -261,24 +300,15 @@ static void mvme3100_init(MachineState *machine)
     i2c = qdev_get_child_bus(dev, "bus");
     assert(i2c);
 
-    dev = DEVICE(object_resolve_path("/machine/pci-host", NULL));
-    assert(dev);
-    /*TODO: add pci-to-pci bridge and fix host bridge IRQ mappings
-     *      to start from IRQ4
-     */
-
     /* The onboard PCI devices (bus 0) have an arbitary IRQ mapping.
      * The TSI18 is a single function devices which uses all 4 IRQ pins
      * QEMU doesn't support this.
      * so we work around this by doing the routing ourselves
      */
     if (object_class_by_name("tsi148")) {
-        PCIBus *pcibus = PCI_BUS(qdev_get_child_bus(dev, "pci.0"));
         PCIDevice *pdev;
 
-        assert(pcibus);
-
-        pdev = pci_create_multifunction(pcibus, PCI_DEVFN(0x11, 0),
+        pdev = pci_create_multifunction(pci0, PCI_DEVFN(0x11, 0),
                                         false, "tsi148");
         dev = DEVICE(pdev);
 
@@ -335,6 +365,21 @@ static void mvme3100_init(MachineState *machine)
                               &error_fatal);
     qdev_prop_set_uint8(dev, "address", 0xd0 >> 1);
     qdev_init_nofail(dev);
+
+    /* root bus is only home to soldered devices, and has a
+     * an arbitrary IRQ pin mapping.
+     * Don't allow qdev_device_add() to consider it.
+     */
+    {
+        BusState *bpci0 = BUS(pci0);
+        BusClass *bcls  = BUS_GET_CLASS(pci0);
+        assert(bpci0);
+
+        /* bus 0 is thus declared to be full.
+         * as a side-effect, expansion PCI bus limited to 15 devices
+         */
+        bpci0->max_index = bcls->max_dev = 15;
+    }
 
     /* TODO: unmodeled i2c devices.
      * 0x90 - ds1621 temperature sensor
@@ -395,6 +440,8 @@ static void mvme3100_init(MachineState *machine)
 
 static void ppce500_machine_init(MachineClass *mc)
 {
+    /* Hack to handle mrf cards with internal sysbus */
+    mc->has_dynamic_sysbus = 1;
     mc->desc = "mvme3100-1152";
     mc->init = mvme3100_init;
     mc->max_cpus = 1;
