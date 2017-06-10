@@ -795,7 +795,6 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     CPUPPCState *firstenv = NULL;
     MemoryRegion *ccsr_addr_space;
     SysBusDevice *s;
-    PPCE500CCSRState *ccsr;
 
     irqs = g_malloc0(smp_cpus * sizeof(qemu_irq *));
     irqs[0] = g_malloc0(smp_cpus * sizeof(qemu_irq) * OPENPIC_OUTPUT_NB);
@@ -855,8 +854,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
     qdev_init_nofail(dev);
-    ccsr = CCSR(dev);
-    ccsr_addr_space = &ccsr->ccsr_space;
+    ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
     memory_region_add_subregion(address_space_mem, params->ccsrbar_base,
                                 ccsr_addr_space);
 
@@ -1046,6 +1044,7 @@ static void e500_ccsr_initfn(Object *obj)
     PPCE500CCSRState *ccsr = CCSR(obj);
     memory_region_init(&ccsr->ccsr_space, obj, "e500-ccsr",
                        MPC8544_CCSRBAR_SIZE);
+    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &ccsr->ccsr_space);
 }
 
 static const TypeInfo e500_ccsr_info = {
