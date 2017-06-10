@@ -1,0 +1,1 @@
+common-obj-$(CONFIG_VME) += vme_bus.o
