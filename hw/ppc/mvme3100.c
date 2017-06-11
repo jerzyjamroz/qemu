@@ -186,6 +186,15 @@ static void mvme3100_cpu_reset(void *opaque)
     env->nip = 0xfffffffc;
 }
 
+static
+void mvme3100_pci1_set_irq(void *opaque, int irq_num, int level)
+{
+    qemu_irq *pic = opaque;
+
+    printf("mvme3100 pci1 irq %d %d\n", irq_num, level);
+    qemu_set_irq(pic[irq_num], level);
+}
+
 /* PCI config from a real mvme3100 as configured by motload
  *
  *  BUS:SLOT:FUN  VENDOR-DEV_ID: COMMAND STATUS BASE_ADDR0 BASE_ADDR1 IRQ_PIN -> IRQ_LINE
@@ -197,10 +206,12 @@ static void mvme3100_cpu_reset(void *opaque)
  *  2:0x00:0    0x1033-0x0035:  0x0146 0x0210 0x80300000 0x00000000       1 ->   4 (=0x04)
  *  2:0x00:1    0x1033-0x0035:  0x0146 0x0210 0x80301000 0x00000000       2 ->   5 (=0x05)
  *
+ * We model one PCI-PCI bridge (0:0x12:0) but with a different vendor/device
+ *
  * We don't model:
- * # The PLX bridges for expansion cards (0x10B5-0x6520),
  * # The SATA controller (0x8086-0x3200)
  * # The USB controllers (0x1033-0x0035)
+ * # The second PCI-PCI bridge (0:0x13:0) in front of the USB controllers
  *
  * (Note that the SATA controller found on newer boards is different)
  */
@@ -242,7 +253,9 @@ static void mvme3100_init(MachineState *machine)
     };
     DeviceState *dev;
     BusState *i2c;
+    PCIBus *pci0, *pci1;
     SysBusDevice *cpld, *ccsr, *pic;
+    qemu_irq *pci1_pins = g_malloc_n(4, sizeof(*pci1_pins));
     FWCfgState *fwinfo;
 
     if (!machine->cpu_model) {
@@ -272,6 +285,34 @@ static void mvme3100_init(MachineState *machine)
     fw_cfg_add_i16(fwinfo, FW_CFG_MAX_CPUS, 1);
     fw_cfg_add_i64(fwinfo, FW_CFG_RAM_SIZE, machine->ram_size);
 
+    dev = DEVICE(object_resolve_path("/machine/pci-host", NULL));
+    assert(dev);
+    pci0 = PCI_BUS(qdev_get_child_bus(dev, "pci.0"));
+    assert(pci0);
+
+    /* Add expansion PCI bus (2x PMC sites)
+     * "pci-bridge" is not a PLX bridge, but shouldn't matter?
+     */
+    dev = qdev_create(BUS(pci0), "pci-bridge");
+
+    qdev_prop_set_uint8(dev, "chassis_nr", 1);
+    qdev_prop_set_int32(dev, "addr", PCI_DEVFN(0x12, 0));
+
+    qdev_init_nofail(dev);
+
+    pci1 = PCI_BUS(qdev_get_child_bus(dev, "pci.1"));
+    assert(pci1);
+
+    pci1_pins[0] = qdev_get_gpio_in(DEVICE(pic), 4);
+    pci1_pins[1] = qdev_get_gpio_in(DEVICE(pic), 5);
+    pci1_pins[2] = qdev_get_gpio_in(DEVICE(pic), 6);
+    pci1_pins[3] = qdev_get_gpio_in(DEVICE(pic), 7);
+
+    pci_bus_irqs(pci1, mvme3100_pci1_set_irq, pci_swizzle_map_irq_fn, pci1_pins, 4);
+
+    /* the actual PLX bridge doesn't emit interrupts */
+    pci_set_byte(PCI_DEVICE(dev)->config + PCI_INTERRUPT_PIN, 0);
+
     /* I2C Controller */
     dev = DEVICE(object_resolve_path("/machine/i2c[0]", NULL));
     assert(dev);
@@ -280,24 +321,15 @@ static void mvme3100_init(MachineState *machine)
     i2c = qdev_get_child_bus(dev, "bus");
     assert(i2c);
 
-    dev = DEVICE(object_resolve_path("/machine/pci-host", NULL));
-    assert(dev);
-    /*TODO: add pci-to-pci bridge and fix host bridge IRQ mappings
-     *      to start from IRQ4
-     */
-
     /* The onboard PCI devices (bus 0) have an arbitary IRQ mapping.
      * The TSI18 is a single function devices which uses all 4 IRQ pins
      * QEMU doesn't support this.
      * so we work around this by doing the routing ourselves
      */
     if (object_class_by_name("tsi148")) {
-        PCIBus *pcibus = PCI_BUS(qdev_get_child_bus(dev, "pci.0"));
         PCIDevice *pdev;
 
-        assert(pcibus);
-
-        pdev = pci_create_multifunction(pcibus, PCI_DEVFN(0x11, 0),
+        pdev = pci_create_multifunction(pci0, PCI_DEVFN(0x11, 0),
                                         false, "tsi148");
         dev = DEVICE(pdev);
 
@@ -364,6 +396,21 @@ static void mvme3100_init(MachineState *machine)
                               &error_fatal);
     qdev_prop_set_uint8(dev, "address", 0xd0 >> 1);
     qdev_init_nofail(dev);
+
+    /* root bus is only home to soldered devices, and has a
+     * an arbitrary IRQ pin mapping.
+     * Don't allow qdev_device_add() to consider it.
+     */
+    {
+        BusState *bpci0 = BUS(pci0);
+        BusClass *bcls  = BUS_GET_CLASS(pci0);
+        assert(bpci0);
+
+        /* bus 0 is thus declared to be full.
+         * as a side-effect, expansion PCI bus limited to 15 devices
+         */
+        bpci0->max_index = bcls->max_dev = 15;
+    }
 
     /* TODO: unmodeled i2c devices.
      * 0x90 - ds1621 temperature sensor
