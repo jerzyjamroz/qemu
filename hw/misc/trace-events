@@ -66,3 +66,13 @@ mps2_scc_cfg_read(unsigned function, unsigned device, uint32_t value) "MPS2 SCC 
 msf2_sysreg_write(uint64_t offset, uint32_t val, uint32_t prev) "msf2-sysreg write: addr 0x%08" HWADDR_PRIx " data 0x%" PRIx32 " prev 0x%" PRIx32
 msf2_sysreg_read(uint64_t offset, uint32_t val) "msf2-sysreg read: addr 0x%08" HWADDR_PRIx " data 0x%08" PRIx32
 msf2_sysreg_write_pll_status(void) "Invalid write to read only PLL status register"
+
+# hw/misc/caen_pico8.c
+pico8_irq(char lvl, char msi) "IRQ lvl=%c msi=%c"
+pico8_dma(uint32_t base, uint32_t count, unsigned irq, unsigned in, unsigned out) "Run %08" PRIx32 " count=%08" PRIx32 "irq=%u in=%u out=%u"
+pico8_reg_read(hwaddr addr, uint32_t val) "" TARGET_FMT_plx " -> %08" PRIx32
+pico8_reg_write(hwaddr addr, uint64_t val) "" TARGET_FMT_plx " -> %08" PRIx64
+pico8_ddr_read(const char *msg, hwaddr addr, uint32_t val, unsigned size) "%s " TARGET_FMT_plx " <- %08" PRIx32 " size=%u"
+pico8_ddr_write(const char *msg, hwaddr addr, uint32_t val, unsigned size) "%s " TARGET_FMT_plx " <- %08" PRIx32 " size=%u"
+pico8_ack(char junk) "ACK%c"
+pico8_missed_ack(char junk) "Missed ACK%c"

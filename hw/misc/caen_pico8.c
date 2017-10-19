@@ -7,14 +7,7 @@
 #include "hw/pci/msi.h"
 #include "sysemu/dma.h"
 
-#if 0
-#define	DBGOUT(fmt, ...) fprintf(stderr, "pico8: " fmt, ## __VA_ARGS__)
-#define	DBGOUTx(fmt, ...) fprintf(stderr, fmt, ## __VA_ARGS__)
-#else
-#define	DBGOUT(fmt, ...) do {} while (0)
-#define	DBGOUTx(fmt, ...) do {} while (0)
-#endif
-
+#include "trace.h"
 
 #define TYPE_CAEN_PICO8 "amc-pico-8"
 
@@ -102,6 +95,7 @@ void pico_update_irq(PicoState *pico)
 {
     uint32_t irq = pico->irq_status;
     bool prev = !!irq;
+    bool sentmsi = false, lvlchange;
 
     if(!fifo_empty(&pico->resp))
         irq |= 1; /* DMA Done */
@@ -115,13 +109,16 @@ void pico_update_irq(PicoState *pico)
         /* send MSI on rising edge of !!irq_status */
         if(!!irq && !prev) {
             msi_notify(&pico->parent_obj, 0);
-            DBGOUT("-> MSI\n");
+            sentmsi = true;
         }
     }
 
     /* update IRQ pin */
-    if(!!irq ^ !prev)
-        DBGOUT("IRQ %c\n", pico->irq_status ? '!' : '_');
+    lvlchange = !!irq ^ !prev;
+
+    if(lvlchange || sentmsi)
+        trace_pico8_irq(lvlchange ? '!' : '_', sentmsi ? '!' : '_');
+
     pico->irq_status =   irq;
     pci_set_irq(&pico->parent_obj, !!irq);
 }
@@ -156,9 +153,7 @@ void pico_run_dma(PicoState *pico)
 
         do_irq |= !!(cmd->cmd&0x08000000);
 
-        DBGOUT("pico_run_dma %08x count %08x do_irq %u resp_in %u resp_out %u\n",
-               (unsigned)cmd->base, (unsigned)cmd->count,
-               do_irq, pico->resp.in, pico->resp.out);
+        trace_pico8_dma(cmd->base, cmd->count, do_irq, pico->resp.in, pico->resp.out);
 
         /* copy in static pattern */
         for(;cmd->count>=sizeof(buf); cmd->base+=sizeof(buf), cmd->count-=sizeof(buf)) {
@@ -205,8 +200,6 @@ pico8_mmio_read(void *opaque, hwaddr addr, unsigned size)
 {
     PicoState *pico = opaque;
     uint32_t ret = pico->regval[addr>>2];
-
-    DBGOUT("pico8 read "TARGET_FMT_plx"\n", addr);
 
     switch(addr) {
     case 0 ... 0x18: /* control registers */
@@ -313,7 +306,7 @@ pico8_mmio_read(void *opaque, hwaddr addr, unsigned size)
         ret = 0xdeadbeef;
     }
 
-    DBGOUT("read %08x -> %08x\n", (unsigned)addr, (unsigned)ret);
+    trace_pico8_reg_read(addr, ret);
 
     return ret;
 }
@@ -324,7 +317,7 @@ pico8_mmio_write(void *opaque, hwaddr addr, uint64_t val,
 {
     PicoState *pico = opaque;
 
-    DBGOUT("pico8 write %08x <- %08x\n", (unsigned)addr, (unsigned)val);
+    trace_pico8_reg_write(addr, val);
 
     /* fall through to store in regval */
 
@@ -411,13 +404,12 @@ pico8_mmio_write(void *opaque, hwaddr addr, uint64_t val,
                 if(val & (1<<18)) {
                     /* clear missed ACK */
                     if(pico->regval[addr>>2] & (1<<18))
-                        DBGOUT("Reset Missed ACK\n");
+                        trace_pico8_ack(' ');
                     pico->regval[addr>>2] &= ~(1<<18);
                 }
                 pico_update_irq(pico);
                 return;
             case 0x30044:
-                DBGOUT("is in AMC slot=%u\n", extract32(val, 16, 4));
                 if(val&0x800) {
                     /* FRIB logic reset */
                     pico->regval[addr>>2] = 0;
@@ -458,37 +450,33 @@ pico8_ddr_write(void *opaque, hwaddr addr, uint64_t val,
     unsigned align = addr&3;
     uint32_t mask = (1ull << (size*8))-1;
 
-    DBGOUT("pico8 ddr write%u %08x <- %08x | ", size, (unsigned)addr, (unsigned)val);
+    trace_pico8_ddr_write("Requested", addr, (uint32_t)val, size);
+
+    if(align) {
+        qemu_log_mask(LOG_GUEST_ERROR, "pico8 DDR RAM doesn't correctly implement unaligned write\n");
+    }
 
     /* pico8 doesn't correctly handle unaligned access across word boundaries.
      * Each operation accesses only a single RAM word.
+     * Data destined for the following word is lost.
      */
     addr -= align;
     addr += PICO_DDR_PAGE*(pico->regval[0x3c004>>2]&0xf); // page select
 
-    DBGOUTx("%08x ->", (unsigned)addr);
-
     temp = address_space_ldl_le(&pico->mram_as, addr, MEMTXATTRS_UNSPECIFIED, &ok);
 
-    DBGOUTx("%08x ->", (unsigned)temp);
-
     if(ok!=MEMTX_OK) {
-        DBGOUTx(" X\n");
         qemu_log_mask(LOG_GUEST_ERROR, "pico8 DDR write/read error %08x\n", (unsigned)addr);
         return;
     }
 
     temp = ror32(temp, align*8)&~mask;
 
-    DBGOUTx("%08x ->", (unsigned)temp);
-
     temp |= val&mask;
-
-    DBGOUTx("%08x ->", (unsigned)temp);
 
     temp = rol32(temp, align*8);
 
-    DBGOUTx("%08x\n", (unsigned)temp);
+    trace_pico8_ddr_write("Actual", addr, (uint32_t)temp, 4);
 
     address_space_stl_le(&pico->mram_as, addr, temp, MEMTXATTRS_UNSPECIFIED, &ok);
 
@@ -506,23 +494,25 @@ pico8_ddr_read(void *opaque, hwaddr addr, unsigned size)
     unsigned align = addr&3;
     PicoState *pico = opaque;
 
-    DBGOUT("pico8 ddr read%u %08x | ", size, (unsigned)addr);
+    trace_pico8_ddr_read("Requested", addr, (uint32_t)0, size);
+
+    if(align) {
+        qemu_log_mask(LOG_GUEST_ERROR, "pico8 DDR RAM doesn't correctly implement unaligned read\n");
+    }
 
     addr -= align;
     addr += PICO_DDR_PAGE*(pico->regval[0x3c004>>2]&0xf); // page select
-    DBGOUTx("%08x ->", (unsigned)addr);
 
     ret = address_space_ldl_le(&pico->mram_as, addr, MEMTXATTRS_UNSPECIFIED, &ok);
 
     if(ok!=MEMTX_OK) {
-        DBGOUTx(" X\n");
         qemu_log_mask(LOG_GUEST_ERROR, "pico8 DDR read error %08x\n", (unsigned)addr);
         return 0xffffffff;
     }
-    DBGOUTx("%08x ->", (unsigned)ret);
 
     ret = ror32(ret, align*8);
-    DBGOUTx("%08x\n", (unsigned)ret);
+
+    trace_pico8_ddr_write("Actual", addr, (uint32_t)ret, 4);
 
     return ret;
 }
@@ -560,7 +550,7 @@ void pico_frib_update_sum_record(void *opaque)
 
     if(pico->regval[0x30004>>2] & (1<<17)) {
         if(!(pico->regval[0x30004>>2] & (1<<18)))
-            DBGOUT("Missed ACK\n");
+            trace_pico8_missed_ack(' ');
         pico->regval[0x30004>>2] |= 1<<18; // missed ACK
         return;
     }
