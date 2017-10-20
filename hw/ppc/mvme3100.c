@@ -33,6 +33,9 @@
 #include "qemu/error-report.h"
 #include "hw/nvram/eeprom_at24c.h"
 
+/* Same as prep.c and other PPC boards */
+#define CFG_ADDR 0xf0000510
+
 /* motload "global environment" variables */
 static
 const char gev[] =
@@ -47,11 +50,15 @@ const char gev[] =
         ;
 
 static
-void fill_vpd(DeviceState *dev, const char *extra)
+void build_vpd(char *buf, size_t cnt, const char *extra)
 {
-    uint32_t cnt = 0;
+    char * const base = buf;
+    const size_t total = cnt;
+
 #define WRITE(N, BUF)  \
-    do {at24c_eeprom_write(dev, cnt, N, BUF); cnt += N; } while (0)
+    do{ assert(N<=cnt); memcpy(buf, BUF, N); buf+=N; cnt-=N; } while(0)
+
+    memset(buf, 0, cnt);
 
     WRITE(8, "MOTOROLA");
 
@@ -64,30 +71,31 @@ void fill_vpd(DeviceState *dev, const char *extra)
     {
         uint32_t val = cpu_to_be32(66666666);
         WRITE(4, (char *)&val);
-        cnt += 1; /* skip one */
+        WRITE(1, "\0");
     }
 
     if (nd_table[0].used) {
         WRITE(2, "\x08\x07");
         WRITE(6, (char *)nd_table[0].macaddr.a);
-        cnt += 1; /* skip one */
+        WRITE(1, "\0");
     }
     if (nd_table[1].used) {
         WRITE(2, "\x08\x07");
         WRITE(6, (char *)nd_table[1].macaddr.a);
-        cnt += 1; /* skip one */
+        WRITE(1, "\0");
     }
 
     WRITE(2, "\xff\x00"); /* End */
 
     /* MOTLOAD's Global Environment Variables
      * start at offset 0x10f8.
-     * This is a set nil terminated strings of the form "name=value"
+     * This is a set of nil terminated strings of the form "name=value"
      * with a zero length string signaling the end.
      */
-    cnt = 0x10f8;
-    at24c_eeprom_write(dev, cnt, sizeof(gev) - 1, gev);
-    cnt += sizeof(gev) - 1;
+    buf = base + 0x10f8;
+    cnt = total - 0x10f8;
+
+    WRITE(sizeof(gev) - 1, gev);
 
     if (extra) {
         char *E = g_strdup(extra);
@@ -103,9 +111,12 @@ void fill_vpd(DeviceState *dev, const char *extra)
             if (olen == 0) {
                 continue;
             }
+            if (!strchr(opt, '=')) {
+                fprintf(stderr, "Missing '=' in -append %s\n", extra);
+                continue;
+            }
 
-            at24c_eeprom_write(dev, cnt, olen + 1, opt);
-            cnt += olen + 1;
+            WRITE(olen+1, opt);
         }
 
         g_strfreev(opts);
@@ -232,6 +243,7 @@ static void mvme3100_init(MachineState *machine)
     DeviceState *dev;
     BusState *i2c;
     SysBusDevice *cpld, *ccsr, *pic;
+    FWCfgState *fwinfo;
 
     if (!machine->cpu_model) {
         machine->cpu_model = "e500_v20";
@@ -254,6 +266,11 @@ static void mvme3100_init(MachineState *machine)
     memory_region_add_subregion(get_system_memory(),
                                 0xe2000000,
                                 sysbus_mmio_get_region(cpld, 0));
+
+    fwinfo = fw_cfg_init_mem(CFG_ADDR, CFG_ADDR + 2);
+    fw_cfg_add_i16(fwinfo, FW_CFG_NB_CPUS, 1);
+    fw_cfg_add_i16(fwinfo, FW_CFG_MAX_CPUS, 1);
+    fw_cfg_add_i64(fwinfo, FW_CFG_RAM_SIZE, machine->ram_size);
 
     /* I2C Controller */
     dev = DEVICE(object_resolve_path("/machine/i2c[0]", NULL));
@@ -299,7 +316,17 @@ static void mvme3100_init(MachineState *machine)
     qdev_prop_set_uint32(dev, "rom-size", 8192 * 8);
     qdev_init_nofail(dev);
 
-    fill_vpd(dev, machine->kernel_cmdline);
+    {
+        char *buf;
+
+        buf = g_malloc0(8192 * 8);
+
+        build_vpd(buf, 8192 * 8, machine->kernel_cmdline);
+
+        at24c_eeprom_write(dev, 0, 8192 * 8, buf);
+
+        fw_cfg_add_file(fwinfo, "tomload/vpd", buf, 8192 * 8);
+    }
 
     /* DS1375 RTC */
     dev = qdev_create(i2c, "ds1375");
@@ -355,13 +382,28 @@ static void mvme3100_init(MachineState *machine)
         g_free(fullname);
     }
 
-    if (machine->kernel_filename &&
-            -1 == load_image_targphys(machine->kernel_filename,
-                                    0x10000, 0x01000000))
     {
-        fprintf(stderr, "qemu: could not load file '%s'\n",
-                machine->kernel_filename);
-        exit(1);
+        hwaddr image_addr = 0x10000;
+
+        int image_size = load_image_targphys(machine->kernel_filename,
+                                             image_addr, 0x01000000);
+        if (machine->kernel_filename &&
+                -1 == image_size)
+        {
+            fprintf(stderr, "qemu: could not load file '%s'\n",
+                    machine->kernel_filename);
+            exit(1);
+        }
+
+        if (machine->kernel_cmdline) {
+            fw_cfg_add_i32(fwinfo, FW_CFG_CMDLINE_SIZE,
+                           strlen(machine->kernel_cmdline) + 1);
+            fw_cfg_add_string(fwinfo, FW_CFG_CMDLINE_DATA,
+                              machine->kernel_cmdline);
+        }
+
+        fw_cfg_add_i32(fwinfo, FW_CFG_KERNEL_ENTRY, image_addr);
+        fw_cfg_add_i32(fwinfo, FW_CFG_KERNEL_SIZE, image_size);
     }
 }
 
