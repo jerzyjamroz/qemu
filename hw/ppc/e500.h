@@ -11,7 +11,7 @@ typedef struct PPCE500Params {
     void (*fixup_devtree)(struct PPCE500Params *params, void *fdt);
 
     int mpic_version;
-    bool has_mpc8xxx_gpio;
+    uint32_t mpc_model; /* eg. 8540, or zero for other OEMs */
     bool has_platform_bus;
     hwaddr platform_bus_base;
     hwaddr platform_bus_size;

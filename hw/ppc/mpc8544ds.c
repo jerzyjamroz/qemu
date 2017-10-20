@@ -35,6 +35,7 @@ static void mpc8544ds_init(MachineState *machine)
         .pci_nr_slots = 2,
         .fixup_devtree = mpc8544ds_fixup_devtree,
         .mpic_version = OPENPIC_MODEL_FSL_MPIC_20,
+        .mpc_model = 8544,
         .ccsrbar_base = 0xE0000000ULL,
         .pci_mmio_base = 0xC0000000ULL,
         .pci_mmio_bus_base = 0xC0000000ULL,

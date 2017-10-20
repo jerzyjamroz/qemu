@@ -36,7 +36,7 @@ static void e500plat_init(MachineState *machine)
         .pci_nr_slots = PCI_SLOT_MAX - 1,
         .fixup_devtree = e500plat_fixup_devtree,
         .mpic_version = OPENPIC_MODEL_FSL_MPIC_42,
-        .has_mpc8xxx_gpio = true,
+        .mpc_model = 8544,
         .has_platform_bus = true,
         .platform_bus_base = 0xf00000000ULL,
         .platform_bus_size = (128ULL * 1024 * 1024),
