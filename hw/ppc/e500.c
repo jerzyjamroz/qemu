@@ -854,7 +854,9 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     object_property_add_child(qdev_get_machine(), "mpc85xx-ccsr",
                               OBJECT(dev), NULL);
     qdev_prop_set_uint32(dev, "model", params->mpc_model);
+    qdev_prop_set_uint32(dev, "porpllsr", params->porpllsr);
     qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
+    qdev_prop_set_uint32(dev, "ram-size", ram_size);
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
