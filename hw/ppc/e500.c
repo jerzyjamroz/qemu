@@ -15,10 +15,10 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "qapi/error.h"
 #include "qemu-common.h"
 #include "e500.h"
-#include "e500-ccsr.h"
 #include "net/net.h"
 #include "qemu/config-file.h"
 #include "hw/hw.h"
@@ -795,7 +795,6 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     CPUPPCState *firstenv = NULL;
     MemoryRegion *ccsr_addr_space;
     SysBusDevice *s;
-    PPCE500CCSRState *ccsr;
 
     irqs = g_malloc0(smp_cpus * sizeof(qemu_irq *));
     irqs[0] = g_malloc0(smp_cpus * sizeof(qemu_irq) * OPENPIC_OUTPUT_NB);
@@ -854,11 +853,9 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     dev = qdev_create(NULL, "e500-ccsr");
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
+    qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
     qdev_init_nofail(dev);
-    ccsr = CCSR(dev);
-    ccsr_addr_space = &ccsr->ccsr_space;
-    memory_region_add_subregion(address_space_mem, params->ccsrbar_base,
-                                ccsr_addr_space);
+    ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
     mpicdev = ppce500_init_mpic(machine, params, ccsr_addr_space, irqs);
 
@@ -874,13 +871,6 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
                        0, qdev_get_gpio_in(mpicdev, 42), 399193,
                        serial_hds[1], DEVICE_BIG_ENDIAN);
     }
-
-    /* General Utility device */
-    dev = qdev_create(NULL, "mpc8544-guts");
-    qdev_init_nofail(dev);
-    s = SYS_BUS_DEVICE(dev);
-    memory_region_add_subregion(ccsr_addr_space, MPC8544_UTIL_OFFSET,
-                                sysbus_mmio_get_region(s, 0));
 
     /* PCI */
     dev = qdev_create(NULL, "e500-pcihost");
@@ -1035,24 +1025,3 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     boot_info->dt_base = dt_base;
     boot_info->dt_size = dt_size;
 }
-
-static void e500_ccsr_initfn(Object *obj)
-{
-    PPCE500CCSRState *ccsr = CCSR(obj);
-    memory_region_init(&ccsr->ccsr_space, obj, "e500-ccsr",
-                       MPC8544_CCSRBAR_SIZE);
-}
-
-static const TypeInfo e500_ccsr_info = {
-    .name          = TYPE_CCSR,
-    .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(PPCE500CCSRState),
-    .instance_init = e500_ccsr_initfn,
-};
-
-static void e500_register_types(void)
-{
-    type_register_static(&e500_ccsr_info);
-}
-
-type_init(e500_register_types)
