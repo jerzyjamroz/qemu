@@ -18,6 +18,9 @@
 #define IMX25_I2C_0_BASE 0x43F80000
 #define DS1338_ADDR 0x68
 
+#define E500_CCSR_BASE 0xff700000
+#define DS1375_ADDR 0xd0
+
 static I2CAdapter *i2c;
 static uint8_t addr;
 static bool use_century;
@@ -148,6 +151,11 @@ int main(int argc, char *argv[])
         addr = DS1338_ADDR;
         use_century = false;
 
+    } else if (strcmp(arch, "ppc") == 0) {
+        qtest_start("-machine mvme3100-1152");
+        i2c = e500_i2c_create(E500_CCSR_BASE);
+        addr = DS1375_ADDR;
+        use_century = true;
     }
 
     qtest_add_data_func("/ds-rtc-i2c/set24", test_time_24, test_rtc_set);
