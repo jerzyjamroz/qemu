@@ -50,6 +50,8 @@
 
 #define E500_DUART_OFFSET(N) (0x4500 + (N) * 0x100)
 
+#define E500_PCI_OFFSET  (0x8000ULL)
+
 #define E500_PORPLLSR    (0xE0000)
 #define E500_PVR         (0xE00A0)
 #define E500_SVR         (0xE00A4)
@@ -76,6 +78,7 @@ typedef struct {
 
     DeviceState *pic;
     DeviceState *i2c;
+    DeviceState *pcihost;
 } CCSRState;
 
 #define TYPE_E500_CCSR "e500-ccsr"
@@ -202,6 +205,7 @@ static void e500_ccsr_init(Object *obj)
     DeviceState *dev = DEVICE(obj);
     CCSRState *ccsr = E500_CCSR(dev);
 
+    /* prepare MPIC */
     assert(current_machine);
     if (kvm_enabled() && machine_kernel_irqchip_allowed(current_machine)) {
 
@@ -236,6 +240,17 @@ static void e500_ccsr_init(Object *obj)
                               OBJECT(ccsr->i2c), NULL);
     qdev_init_nofail(ccsr->i2c);
 
+    /* prepare PCI host bridge */
+    ccsr->pcihost = qdev_create(NULL, "e500-pcihost");
+    object_property_add_child(qdev_get_machine(), "pci-host", OBJECT(ccsr->pcihost),
+                              &error_abort);
+
+    object_property_add_alias(obj, "pci_first_slot",
+                              OBJECT(ccsr->pcihost), "first_slot",
+                              &error_fatal);
+    object_property_add_alias(obj, "pci_first_pin_irq",
+                              OBJECT(ccsr->pcihost), "first_pin_irq",
+                              &error_fatal);
 }
 
 static void e500_ccsr_realize(DeviceState *dev, Error **errp)
@@ -248,6 +263,7 @@ static void e500_ccsr_realize(DeviceState *dev, Error **errp)
                           ccsr, "e500-ccsr", 1024 * 1024);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &ccsr->iomem);
 
+    /* realize MPIC */
     qdev_init_nofail(ccsr->pic);
     pic = SYS_BUS_DEVICE(ccsr->pic);
 
@@ -280,6 +296,13 @@ static void e500_ccsr_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(&ccsr->iomem, E500_MPIC_OFFSET,
                                 sysbus_mmio_get_region(pic, 0));
     /* Note: MPIC internal interrupts are offset by 16 */
+
+    /* realize PCI host bridge*/
+    qdev_init_nofail(ccsr->pcihost);
+
+    memory_region_add_subregion(&ccsr->iomem, E500_PCI_OFFSET,
+                                sysbus_mmio_get_region(
+                                    SYS_BUS_DEVICE(ccsr->pcihost), 0));
 
     /* attach I2C controller */
     memory_region_add_subregion(&ccsr->iomem, E500_I2C_OFFSET,
@@ -316,6 +339,9 @@ static Property e500_ccsr_props[] = {
     DEFINE_PROP_UINT32("porpllsr", CCSRState, porpllsr, 0),
     DEFINE_PROP_UINT32("ccb-freq", CCSRState, ccb_freq, 333333333u),
     /* "mpic-model" aliased from MPIC */
+    /* "pci_first_slot"
+     * "pci_first_pin_irq" aliased from PCI host bridge
+     */
     DEFINE_PROP_END_OF_LIST()
 };
 
