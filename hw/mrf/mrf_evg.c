@@ -236,7 +236,7 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         if(s->bridgetype==1 && s->fwversion<0x8) {
             s->pciint = !!(val&0x40000000);
         } else if(val&0x40000000) {
-            ERR(LOG_GUEST_ERROR, "Setting PCI MIE bit has no effect in IRQEnable");
+            DBGOUT(1, "Setting PCI MIE bit has no effect in IRQEnable");
             val &= ~0x40000000;
         }
         val &= 0xc0003363;
@@ -433,7 +433,7 @@ static void mrf_evg_reset(DeviceState *dev)
     if(s->bridgetype != 0) {
         s->evgbe = 1;
     }
-    if(s->bridgetype == 1) {
+    if(s->bridgetype != 1) {
         s->pciint = 1;
     }
     s->evgreg[0x2C>>2] = 0x20000000 | ((s->mrftype&0xf)<<24) | s->fwversion;

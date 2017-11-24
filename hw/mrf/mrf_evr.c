@@ -21,6 +21,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "qemu/bswap.h"
 #include "qapi/error.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
@@ -126,7 +127,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
 {
     EVRState *s = opaque;
     if(s->evrbe)
-        val = __bswap_32(val);
+        val = bswap32(val);
 
     if(addr>=0x8200 && addr<0x8400)
         return; /* SFP info, RO */
@@ -169,7 +170,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         if(s->bridgetype==1 && s->fwversion<0xa) {
             s->pciint = !!(val&0x40000000);
         } else if(val&0x40000000) {
-            ERR(LOG_GUEST_ERROR, "Setting PCI MIE bit has no effect in IRQEnable");
+            DBGOUT(1, "Setting PCI MIE bit has no effect in IRQEnable");
             val &= ~0x40000000;
         }
         val &= 0xc000007f;
@@ -244,7 +245,7 @@ evr_mmio_read(void *opaque, hwaddr addr, unsigned size)
     DBGOUT(3, TARGET_FMT_plx" -> %08"PRIx32, addr, ret);
 
     if(s->evrbe)
-        ret = __bswap_32(ret);
+        ret = bswap32(ret);
     return ret;
 }
 
