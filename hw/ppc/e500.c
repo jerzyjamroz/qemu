@@ -769,6 +769,8 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     qdev_prop_set_uint32(dev, "mpic-model", params->mpic_version);
     qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
     qdev_prop_set_uint32(dev, "ram-size", ram_size);
+    qdev_prop_set_uint32(dev, "pci_first_slot", params->pci_first_slot);
+    qdev_prop_set_uint32(dev, "pci_first_pin_irq", pci_irq_nrs[0]);
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
@@ -778,19 +780,12 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
 
 
     /* PCI */
-    dev = qdev_create(NULL, "e500-pcihost");
-    object_property_add_child(qdev_get_machine(), "pci-host", OBJECT(dev),
-                              &error_abort);
-    qdev_prop_set_uint32(dev, "first_slot", params->pci_first_slot);
-    qdev_prop_set_uint32(dev, "first_pin_irq", pci_irq_nrs[0]);
-    qdev_init_nofail(dev);
+    dev = DEVICE(object_resolve_path("/machine/pci-host", 0));
+    assert(dev);
     s = SYS_BUS_DEVICE(dev);
     for (i = 0; i < PCI_NUM_PINS; i++) {
         sysbus_connect_irq(s, i, qdev_get_gpio_in(mpicdev, pci_irq_nrs[i]));
     }
-
-    memory_region_add_subregion(ccsr_addr_space, MPC8544_PCI_REGS_OFFSET,
-                                sysbus_mmio_get_region(s, 0));
 
     pci_bus = (PCIBus *)qdev_get_child_bus(dev, "pci.0");
     if (!pci_bus)
