@@ -29,7 +29,6 @@
 #include "sysemu/kvm.h"
 #include "kvm_ppc.h"
 #include "sysemu/device_tree.h"
-#include "hw/ppc/openpic.h"
 #include "hw/ppc/ppc.h"
 #include "hw/loader.h"
 #include "elf.h"
@@ -679,92 +678,6 @@ static void ppce500_cpu_reset(void *opaque)
     mmubooke_create_initial_mapping(env);
 }
 
-static DeviceState *ppce500_init_mpic_qemu(PPCE500Params *params,
-                                           qemu_irq **irqs)
-{
-    DeviceState *dev;
-    SysBusDevice *s;
-    int i, j, k;
-
-    dev = qdev_create(NULL, TYPE_OPENPIC);
-    object_property_add_child(qdev_get_machine(), "pic", OBJECT(dev),
-                              &error_fatal);
-    qdev_prop_set_uint32(dev, "model", params->mpic_version);
-    qdev_prop_set_uint32(dev, "nb_cpus", smp_cpus);
-
-    qdev_init_nofail(dev);
-    s = SYS_BUS_DEVICE(dev);
-
-    k = 0;
-    for (i = 0; i < smp_cpus; i++) {
-        for (j = 0; j < OPENPIC_OUTPUT_NB; j++) {
-            sysbus_connect_irq(s, k++, irqs[i][j]);
-        }
-    }
-
-    return dev;
-}
-
-static DeviceState *ppce500_init_mpic_kvm(PPCE500Params *params,
-                                          qemu_irq **irqs, Error **errp)
-{
-    Error *err = NULL;
-    DeviceState *dev;
-    CPUState *cs;
-
-    dev = qdev_create(NULL, TYPE_KVM_OPENPIC);
-    qdev_prop_set_uint32(dev, "model", params->mpic_version);
-
-    object_property_set_bool(OBJECT(dev), true, "realized", &err);
-    if (err) {
-        error_propagate(errp, err);
-        object_unparent(OBJECT(dev));
-        return NULL;
-    }
-
-    CPU_FOREACH(cs) {
-        if (kvm_openpic_connect_vcpu(dev, cs)) {
-            fprintf(stderr, "%s: failed to connect vcpu to irqchip\n",
-                    __func__);
-            abort();
-        }
-    }
-
-    return dev;
-}
-
-static DeviceState *ppce500_init_mpic(MachineState *machine,
-                                      PPCE500Params *params,
-                                      MemoryRegion *ccsr,
-                                      qemu_irq **irqs)
-{
-    DeviceState *dev = NULL;
-    SysBusDevice *s;
-
-    if (kvm_enabled()) {
-        Error *err = NULL;
-
-        if (machine_kernel_irqchip_allowed(machine)) {
-            dev = ppce500_init_mpic_kvm(params, irqs, &err);
-        }
-        if (machine_kernel_irqchip_required(machine) && !dev) {
-            error_reportf_err(err,
-                              "kernel_irqchip requested but unavailable: ");
-            exit(1);
-        }
-    }
-
-    if (!dev) {
-        dev = ppce500_init_mpic_qemu(params, irqs);
-    }
-
-    s = SYS_BUS_DEVICE(dev);
-    memory_region_add_subregion(ccsr, MPC8544_MPIC_REGS_OFFSET,
-                                s->mmio[0].memory);
-
-    return dev;
-}
-
 static void ppce500_power_off(void *opaque, int line, int on)
 {
     if (on) {
@@ -794,18 +707,14 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     /* irq num for pin INTA, INTB, INTC and INTD is 1, 2, 3 and
      * 4 respectively */
     unsigned int pci_irq_nrs[PCI_NUM_PINS] = {1, 2, 3, 4};
-    qemu_irq **irqs;
     DeviceState *dev, *mpicdev;
     CPUPPCState *firstenv = NULL;
     MemoryRegion *ccsr_addr_space;
     SysBusDevice *s;
 
-    irqs = g_malloc0(smp_cpus * sizeof(qemu_irq *));
-    irqs[0] = g_malloc0(smp_cpus * sizeof(qemu_irq) * OPENPIC_OUTPUT_NB);
     for (i = 0; i < smp_cpus; i++) {
         PowerPCCPU *cpu;
         CPUState *cs;
-        qemu_irq *input;
 
         cpu = POWERPC_CPU(cpu_create(machine->cpu_type));
         env = &cpu->env;
@@ -821,13 +730,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
             firstenv = env;
         }
 
-        irqs[i] = irqs[0] + (i * OPENPIC_OUTPUT_NB);
-        input = (qemu_irq *)env->irq_inputs;
-        irqs[i][OPENPIC_OUTPUT_INT] = input[PPCE500_INPUT_INT];
-        irqs[i][OPENPIC_OUTPUT_CINT] = input[PPCE500_INPUT_CINT];
         env->spr_cb[SPR_BOOKE_PIR].default_value = cs->cpu_index = i;
-        env->mpic_iack = params->ccsrbar_base +
-                         MPC8544_MPIC_REGS_OFFSET + 0xa0;
 
         ppc_booke_timers_init(cpu, 400000000, PPC_TIMER_E500);
 
@@ -857,12 +760,15 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     dev = qdev_create(NULL, "e500-ccsr");
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
+    qdev_prop_set_uint32(dev, "mpic-model", params->mpic_version);
     qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
     qdev_prop_set_uint32(dev, "ram-size", ram_size);
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
-    mpicdev = ppce500_init_mpic(machine, params, ccsr_addr_space, irqs);
+    /* created under "e500-ccsr" */
+    mpicdev = DEVICE(object_resolve_path("/machine/pic", 0));
+    assert(mpicdev);
 
     /* Serial */
     if (serial_hds[0]) {

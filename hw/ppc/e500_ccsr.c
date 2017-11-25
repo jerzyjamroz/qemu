@@ -24,10 +24,14 @@
 #include "qemu-common.h"
 #include "qemu/log.h"
 #include "qemu/error-report.h"
+#include "qapi/error.h"
 #include "cpu.h"
 #include "hw/hw.h"
+#include "hw/boards.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/kvm.h"
 #include "hw/sysbus.h"
+#include "hw/ppc/openpic.h"
 
 /* E500_ denotes registers common to all */
 /* Some CCSR offsets duplicated in e500.c */
@@ -185,20 +189,90 @@ static void e500_ccsr_reset(DeviceState *dev)
     e500_ccsr_post_move(ccsr);
 }
 
-static void e500_ccsr_initfn(Object *obj)
+static void e500_ccsr_init(Object *obj)
 {
-    CCSRState *ccsr = E500_CCSR(obj);
+    DeviceState *dev = DEVICE(obj);
+    CCSRState *ccsr = E500_CCSR(dev);
 
-    memory_region_init_io(&ccsr->iomem, obj, &e500_ccsr_ops,
+    assert(current_machine);
+    if (kvm_enabled()) {
+
+        if (!machine_kernel_irqchip_allowed(current_machine)) {
+            error_report("Machine does not allow PIC,"
+                         " but this is not supported");
+            exit(1);
+        }
+
+        ccsr->pic = qdev_create(NULL, TYPE_KVM_OPENPIC);
+    } else {
+        ccsr->pic = qdev_create(NULL, TYPE_OPENPIC);
+    }
+
+    if (!ccsr->pic) {
+        error_report("Failed to create PIC");
+        exit(1);
+    }
+
+    object_property_add_child(qdev_get_machine(), "pic", OBJECT(ccsr->pic),
+                              &error_fatal);
+
+    qdev_prop_set_uint32(ccsr->pic, "nb_cpus", smp_cpus);
+
+    object_property_add_alias(obj, "mpic-model",
+                              OBJECT(ccsr->pic), "model",
+                              &error_fatal);
+}
+
+static void e500_ccsr_realize(DeviceState *dev, Error **errp)
+{
+    CCSRState *ccsr = E500_CCSR(dev);
+    SysBusDevice *pic;
+
+    /* Base 1MB CCSR Region */
+    memory_region_init_io(&ccsr->iomem, OBJECT(dev), &e500_ccsr_ops,
                           ccsr, "e500-ccsr", 1024 * 1024);
-    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &ccsr->iomem);
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &ccsr->iomem);
 
+    qdev_init_nofail(ccsr->pic);
+    pic = SYS_BUS_DEVICE(ccsr->pic);
+
+    /* connect MPIC to CPU(s) */
+    if (kvm_enabled()) {
+        CPUState *cs;
+
+        CPU_FOREACH(cs) {
+            if (kvm_openpic_connect_vcpu(ccsr->pic, cs)) {
+                error_setg(errp, "%s: failed to connect vcpu to irqchip",
+                           __func__);
+                return;
+            }
+        }
+
+    } else {
+        CPUState *cs;
+
+        CPU_FOREACH(cs) {
+            PowerPCCPU *cpu = POWERPC_CPU(cs);
+            CPUPPCState *env = &cpu->env;
+            qemu_irq *inputs = (qemu_irq *)env->irq_inputs;
+            int base = cs->cpu_index * PPCE500_INPUT_NB;
+
+            sysbus_connect_irq(pic, base + OPENPIC_OUTPUT_INT,
+                               inputs[PPCE500_INPUT_INT]);
+            sysbus_connect_irq(pic, base + OPENPIC_OUTPUT_CINT,
+                               inputs[PPCE500_INPUT_CINT]);
+        }
+    }
+
+    memory_region_add_subregion(&ccsr->iomem, E500_MPIC_OFFSET,
+                                sysbus_mmio_get_region(pic, 0));
 }
 
 static Property e500_ccsr_props[] = {
     DEFINE_PROP_UINT32("base", CCSRState, defbase, 0xff700000),
     DEFINE_PROP_UINT32("ram-size", CCSRState, ram_size, 0),
     DEFINE_PROP_UINT32("porpllsr", CCSRState, porpllsr, 0),
+    /* "mpic-model" aliased from MPIC */
     DEFINE_PROP_END_OF_LIST()
 };
 
@@ -221,6 +295,7 @@ void e500_ccsr_class_initfn(ObjectClass *klass, void *data)
 
     dc->props = e500_ccsr_props;
     dc->vmsd = &vmstate_e500_ccsr;
+    dc->realize = e500_ccsr_realize;
     dc->reset = e500_ccsr_reset;
 }
 
@@ -228,7 +303,7 @@ static const TypeInfo e500_ccsr_info = {
     .name          = TYPE_E500_CCSR,
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(CCSRState),
-    .instance_init = e500_ccsr_initfn,
+    .instance_init = e500_ccsr_init,
     .class_size    = sizeof(SysBusDeviceClass),
     .class_init    = e500_ccsr_class_initfn
 };
