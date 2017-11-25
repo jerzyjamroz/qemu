@@ -24,7 +24,8 @@ typedef struct PPCE500Params {
     hwaddr spin_base;
 } PPCE500Params;
 
-void ppce500_init(MachineState *machine, PPCE500Params *params);
+void ppce500_init(MachineState *machine, uint32_t decrementer_freq);
+void mpc85xx_init(MachineState *machine, PPCE500Params *params);
 
 hwaddr booke206_page_size_to_tlb(uint64_t size);
 
