@@ -30,12 +30,25 @@
 #include "hw/sysbus.h"
 
 /* E500_ denotes registers common to all */
+/* Some CCSR offsets duplicated in e500.c */
 
+#define E500_CCSRBAR     (0)
+
+#define E500_CS0_BNDS    (0x2000)
+
+#define E500_CS0_CONFIG  (0x2080)
+
+#define E500_ERR_DETECT  (0x2e40)
+#define E500_ERR_DISABLE (0x2e44)
+
+#define E500_PORPLLSR    (0xE0000)
 #define E500_PVR         (0xE00A0)
 #define E500_SVR         (0xE00A4)
 
 #define MPC8544_RSTCR       (0xE00B0)
 #define MPC8544_RSTCR_RESET      (0x02)
+
+#define E500_MPIC_OFFSET   (0x40000ULL)
 
 typedef struct {
     /*< private >*/
@@ -44,19 +57,59 @@ typedef struct {
 
     MemoryRegion iomem;
 
-    uint32_t defbase;
+    uint32_t defbase, base;
+    uint32_t ram_size;
+    uint32_t merrd;
+
+    uint32_t porpllsr;
+
+    DeviceState *pic;
 } CCSRState;
 
 #define TYPE_E500_CCSR "e500-ccsr"
 #define E500_CCSR(obj) OBJECT_CHECK(CCSRState, (obj), TYPE_E500_CCSR)
 
+/* call after changing CCSRState::base */
+static void e500_ccsr_post_move(CCSRState *ccsr)
+{
+    CPUState *cs;
+
+    CPU_FOREACH(cs) {
+        PowerPCCPU *cpu = POWERPC_CPU(cs);
+        CPUPPCState *env = &cpu->env;
+
+        env->mpic_iack = ccsr->base +
+                         E500_MPIC_OFFSET + 0xa0;
+    }
+
+    sysbus_mmio_map(SYS_BUS_DEVICE(ccsr), 0, ccsr->base);
+}
+
 static uint64_t e500_ccsr_read(void *opaque, hwaddr addr,
                                   unsigned size)
 {
+    CCSRState *ccsr = opaque;
     PowerPCCPU *cpu = POWERPC_CPU(current_cpu);
     CPUPPCState *env = &cpu->env;
 
     switch (addr) {
+    case E500_CCSRBAR:
+        return ccsr->base >> 12;
+    case E500_CS0_BNDS:
+        /* we model all RAM in a single chip with addresses [0, ram_size) */
+        return (ccsr->ram_size - 1) >> 24;
+    case E500_CS0_CONFIG:
+        return 1 << 31;
+    case E500_ERR_DETECT:
+        return 0; /* (errors not modeled) */
+    case E500_ERR_DISABLE:
+        return ccsr->merrd;
+    case E500_PORPLLSR:
+        if (!ccsr->porpllsr) {
+            qemu_log_mask(LOG_UNIMP,
+                          "Machine does not provide valid PORPLLSR\n");
+        }
+        return ccsr->porpllsr;
     case E500_PVR:
         return env->spr[SPR_PVR];
     case E500_SVR:
@@ -72,9 +125,21 @@ static uint64_t e500_ccsr_read(void *opaque, hwaddr addr,
 static void e500_ccsr_write(void *opaque, hwaddr addr,
                                uint64_t value, unsigned size)
 {
+    CCSRState *ccsr = opaque;
     PowerPCCPU *cpu = POWERPC_CPU(current_cpu);
     CPUPPCState *env = &cpu->env;
     uint32_t svr = env->spr[SPR_E500_SVR] >> 16;
+
+    switch (addr) {
+    case E500_CCSRBAR:
+        value &= 0x000fff00;
+        ccsr->base = value << 12;
+        e500_ccsr_post_move(ccsr);
+        return;
+    case E500_ERR_DISABLE:
+        ccsr->merrd = value & 0xd;
+        return;
+    }
 
     switch (svr) {
     case 0: /* generic.  assumed to be mpc8544ds or e500plat board */
@@ -104,11 +169,20 @@ static const MemoryRegionOps e500_ccsr_ops = {
     }
 };
 
+static int e500_ccsr_post_load(void *opaque, int version_id)
+{
+    CCSRState *ccsr = opaque;
+
+    e500_ccsr_post_move(ccsr);
+    return 0;
+}
+
 static void e500_ccsr_reset(DeviceState *dev)
 {
     CCSRState *ccsr = E500_CCSR(dev);
 
-    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, ccsr->defbase);
+    ccsr->base = ccsr->defbase;
+    e500_ccsr_post_move(ccsr);
 }
 
 static void e500_ccsr_initfn(Object *obj)
@@ -123,7 +197,21 @@ static void e500_ccsr_initfn(Object *obj)
 
 static Property e500_ccsr_props[] = {
     DEFINE_PROP_UINT32("base", CCSRState, defbase, 0xff700000),
+    DEFINE_PROP_UINT32("ram-size", CCSRState, ram_size, 0),
+    DEFINE_PROP_UINT32("porpllsr", CCSRState, porpllsr, 0),
     DEFINE_PROP_END_OF_LIST()
+};
+
+static const VMStateDescription vmstate_e500_ccsr = {
+    .name = TYPE_E500_CCSR,
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .post_load = e500_ccsr_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(base, CCSRState),
+        VMSTATE_UINT32(merrd, CCSRState),
+        VMSTATE_END_OF_LIST()
+    }
 };
 
 static
@@ -132,6 +220,7 @@ void e500_ccsr_class_initfn(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->props = e500_ccsr_props;
+    dc->vmsd = &vmstate_e500_ccsr;
     dc->reset = e500_ccsr_reset;
 }
 

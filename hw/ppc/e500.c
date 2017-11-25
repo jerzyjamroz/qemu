@@ -51,7 +51,9 @@
 
 #define RAM_SIZES_ALIGN            (64UL << 20)
 
-/* TODO: parameterize */
+/* TODO: parameterize
+ * Some CCSR offsets duplicated in e500_ccsr.c
+ */
 #define MPC8544_CCSRBAR_SIZE       0x00100000ULL
 #define MPC8544_MPIC_REGS_OFFSET   0x40000ULL
 #define MPC8544_MSI_REGS_OFFSET   0x41600ULL
@@ -856,6 +858,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
     qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
+    qdev_prop_set_uint32(dev, "ram-size", ram_size);
     qdev_init_nofail(dev);
     ccsr_addr_space = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0);
 
