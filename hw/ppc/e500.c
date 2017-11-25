@@ -690,7 +690,32 @@ static void ppce500_power_off(void *opaque, int line, int on)
     }
 }
 
-void ppce500_init(MachineState *machine, PPCE500Params *params)
+
+void ppce500_init(MachineState *machine, uint32_t decrementer_freq)
+{
+    int i;
+    for (i = 0; i < smp_cpus; i++) {
+        PowerPCCPU *cpu;
+        CPUState *cs;
+        CPUPPCState *env;
+
+        cpu = POWERPC_CPU(cpu_create(machine->cpu_type));
+        env = &cpu->env;
+        cs = CPU(cpu);
+
+        if (env->mmu_model != POWERPC_MMU_BOOKE206) {
+            error_report("MMU model %i not supported by this machine.",
+                         env->mmu_model);
+            exit(1);
+        }
+
+        env->spr_cb[SPR_BOOKE_PIR].default_value = cs->cpu_index = i;
+
+        ppc_booke_timers_init(cpu, decrementer_freq, PPC_TIMER_E500);
+    }
+}
+
+void mpc85xx_init(MachineState *machine, PPCE500Params *params)
 {
     MemoryRegion *address_space_mem = get_system_memory();
     MemoryRegion *ram = g_new(MemoryRegion, 1);
@@ -716,31 +741,21 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     CPUPPCState *firstenv = NULL;
     MemoryRegion *ccsr_addr_space;
     SysBusDevice *s;
+    CPUState *cs;
 
-    for (i = 0; i < smp_cpus; i++) {
+    ppce500_init(machine, 400000000);
+
+    CPU_FOREACH(cs) {
         PowerPCCPU *cpu;
-        CPUState *cs;
 
-        cpu = POWERPC_CPU(cpu_create(machine->cpu_type));
+        cpu = POWERPC_CPU(cs);
         env = &cpu->env;
-        cs = CPU(cpu);
 
-        if (env->mmu_model != POWERPC_MMU_BOOKE206) {
-            fprintf(stderr, "MMU model %i not supported by this machine.\n",
-                env->mmu_model);
-            exit(1);
-        }
-
-        if (!firstenv) {
-            firstenv = env;
-        }
-
-        env->spr_cb[SPR_BOOKE_PIR].default_value = cs->cpu_index = i;
-
-        ppc_booke_timers_init(cpu, 400000000, PPC_TIMER_E500);
 
         /* Register reset handler */
-        if (!i) {
+        if (!firstenv) {
+            firstenv = env;
+
             /* Primary CPU */
             struct boot_info *boot_info;
             boot_info = g_malloc0(sizeof(struct boot_info));

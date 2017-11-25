@@ -47,7 +47,7 @@ static void mpc8544ds_init(MachineState *machine)
         exit(1);
     }
 
-    ppce500_init(machine, &params);
+    mpc85xx_init(machine, &params);
 }
 
 

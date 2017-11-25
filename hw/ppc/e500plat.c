@@ -55,7 +55,7 @@ static void e500plat_init(MachineState *machine)
         params.mpic_version = OPENPIC_MODEL_FSL_MPIC_20;
     }
 
-    ppce500_init(machine, &params);
+    mpc85xx_init(machine, &params);
 }
 
 static void e500plat_machine_init(MachineClass *mc)
