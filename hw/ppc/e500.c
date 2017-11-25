@@ -49,6 +49,12 @@
 
 #define RAM_SIZES_ALIGN            (64UL << 20)
 
+/* Somewhat arbitrarily choosen Complex Core Bus frequency
+ * for our simulation (real freq of mpc8544ds board unknown)
+ * Used in baud rate calculations.
+ */
+#define CCB_FREQ (333333333)
+
 /* TODO: parameterize
  * Some CCSR offsets duplicated in e500_ccsr.c
  */
@@ -113,7 +119,7 @@ static void dt_serial_create(void *fdt, unsigned long long offset,
     qemu_fdt_setprop_string(fdt, ser, "compatible", "ns16550");
     qemu_fdt_setprop_cells(fdt, ser, "reg", offset, 0x100);
     qemu_fdt_setprop_cell(fdt, ser, "cell-index", idx);
-    qemu_fdt_setprop_cell(fdt, ser, "clock-frequency", 0);
+    qemu_fdt_setprop_cell(fdt, ser, "clock-frequency", CCB_FREQ);
     qemu_fdt_setprop_cells(fdt, ser, "interrupts", 42, 2);
     qemu_fdt_setprop_phandle(fdt, ser, "interrupt-parent", mpic);
     qemu_fdt_setprop_string(fdt, "/aliases", alias, ser);
@@ -759,6 +765,7 @@ void ppce500_init(MachineState *machine, PPCE500Params *params)
     dev = qdev_create(NULL, "e500-ccsr");
     object_property_add_child(qdev_get_machine(), "e500-ccsr",
                               OBJECT(dev), NULL);
+    qdev_prop_set_uint32(dev, "ccb-freq", CCB_FREQ);
     qdev_prop_set_uint32(dev, "mpic-model", params->mpic_version);
     qdev_prop_set_uint32(dev, "base", params->ccsrbar_base);
     qdev_prop_set_uint32(dev, "ram-size", ram_size);

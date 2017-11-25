@@ -69,6 +69,7 @@ typedef struct {
     uint32_t merrd;
 
     uint32_t porpllsr;
+    uint32_t ccb_freq;
 
     DeviceState *pic;
 } CCSRState;
@@ -272,15 +273,21 @@ static void e500_ccsr_realize(DeviceState *dev, Error **errp)
     /* Note: MPIC internal interrupts are offset by 16 */
 
     /* DUARTS */
+    /* for mpc8540, mpc8544, and P2010 (unmodeled), the DUART reference clock
+     * is the CCB clock divided by 16.
+     * So baud rate is CCB/(16*divider)
+     */
     if (serial_hds[0]) {
-        serial_mm_init(&ccsr->iomem, E500_DUART_OFFSET(0),
-                       0, qdev_get_gpio_in(ccsr->pic, 16 + 26), 399193,
+        serial_mm_init(&ccsr->iomem, E500_DUART_OFFSET(0), 0,
+                       qdev_get_gpio_in(ccsr->pic, 16 + 26),
+                       ccsr->ccb_freq / 16u,
                        serial_hds[0], DEVICE_BIG_ENDIAN);
     }
 
     if (serial_hds[1]) {
-        serial_mm_init(&ccsr->iomem, E500_DUART_OFFSET(1),
-                       0, qdev_get_gpio_in(ccsr->pic, 16 + 26), 399193,
+        serial_mm_init(&ccsr->iomem, E500_DUART_OFFSET(1), 0,
+                       qdev_get_gpio_in(ccsr->pic, 16 + 26),
+                       ccsr->ccb_freq / 16u,
                        serial_hds[1], DEVICE_BIG_ENDIAN);
     }
 
@@ -290,6 +297,7 @@ static Property e500_ccsr_props[] = {
     DEFINE_PROP_UINT32("base", CCSRState, defbase, 0xff700000),
     DEFINE_PROP_UINT32("ram-size", CCSRState, ram_size, 0),
     DEFINE_PROP_UINT32("porpllsr", CCSRState, porpllsr, 0),
+    DEFINE_PROP_UINT32("ccb-freq", CCSRState, ccb_freq, 333333333u),
     /* "mpic-model" aliased from MPIC */
     DEFINE_PROP_END_OF_LIST()
 };
