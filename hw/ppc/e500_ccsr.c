@@ -46,6 +46,8 @@
 #define E500_ERR_DETECT  (0x2e40)
 #define E500_ERR_DISABLE (0x2e44)
 
+#define E500_I2C_OFFSET  (0x3000)
+
 #define E500_DUART_OFFSET(N) (0x4500 + (N) * 0x100)
 
 #define E500_PORPLLSR    (0xE0000)
@@ -72,6 +74,7 @@ typedef struct {
     uint32_t ccb_freq;
 
     DeviceState *pic;
+    DeviceState *i2c;
 } CCSRState;
 
 #define TYPE_E500_CCSR "e500-ccsr"
@@ -271,6 +274,18 @@ static void e500_ccsr_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(&ccsr->iomem, E500_MPIC_OFFSET,
                                 sysbus_mmio_get_region(pic, 0));
     /* Note: MPIC internal interrupts are offset by 16 */
+
+    /* attach I2C controller */
+    ccsr->i2c = qdev_create(NULL, "mpc8540-i2c");
+    object_property_add_child(qdev_get_machine(), "i2c[*]",
+                              OBJECT(ccsr->i2c), NULL);
+    qdev_init_nofail(ccsr->i2c);
+    memory_region_add_subregion(&ccsr->iomem, E500_I2C_OFFSET,
+                                sysbus_mmio_get_region(
+                                    SYS_BUS_DEVICE(ccsr->i2c), 0));
+    sysbus_connect_irq(SYS_BUS_DEVICE(ccsr->i2c), 0,
+                          qdev_get_gpio_in(ccsr->pic, 16 + 27));
+
 
     /* DUARTS */
     /* for mpc8540, mpc8544, and P2010 (unmodeled), the DUART reference clock
