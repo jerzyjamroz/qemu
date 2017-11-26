@@ -423,11 +423,6 @@ static void e500_pcihost_bridge_realize(PCIDevice *d, Error **errp)
                                                       "/e500-ccsr"));
     MemoryRegion *ccsr_mr = sysbus_mmio_get_region(ccsr, 0);
 
-    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_PCI);
-    d->config[PCI_HEADER_TYPE] =
-        (d->config[PCI_HEADER_TYPE] & PCI_HEADER_TYPE_MULTI_FUNCTION) |
-        PCI_HEADER_TYPE_BRIDGE;
-
     memory_region_init_alias(&b->bar0, OBJECT(ccsr), "e500-pci-bar0", ccsr_mr,
                              0, memory_region_size(ccsr_mr));
     pci_register_bar(d, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &b->bar0);
