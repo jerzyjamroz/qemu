@@ -70,10 +70,7 @@ int main(int argc, char *argv[])
 
     ret = g_test_run();
 
-    printf("Tests done\n");
-
     qtest_end();
-    printf("Tests end\n");
 
     return ret;
 }
