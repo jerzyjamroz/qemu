@@ -2012,6 +2012,7 @@ void ppc_compat_add_property(Object *obj, const char *name,
 #define   L1CSR1_ICE		0x00000001	/* Instruction Cache Enable */
 
 /* HID0 bits */
+#define HID0_TBEN           PPC_BIT(49) /* Freescale e200/e500 */
 #define HID0_DEEPNAP        (1 << 24)           /* pre-2.06 */
 #define HID0_DOZE           (1 << 23)           /* pre-2.06 */
 #define HID0_NAP            (1 << 22)           /* pre-2.06 */
