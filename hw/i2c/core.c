@@ -10,6 +10,8 @@
 #include "qemu/osdep.h"
 #include "hw/i2c/i2c.h"
 
+#include "trace.h"
+
 typedef struct I2CNode I2CNode;
 
 struct I2CNode {
@@ -144,6 +146,9 @@ int i2c_start_transfer(I2CBus *bus, uint8_t address, int recv)
     }
 
     if (QLIST_EMPTY(&bus->current_devs)) {
+        if (!bus->broadcast) {
+            trace_i2c_start_transfer_nodev(address);
+        }
         return 1;
     }
 
@@ -157,6 +162,8 @@ int i2c_start_transfer(I2CBus *bus, uint8_t address, int recv)
         if (sc->event) {
             rv = sc->event(node->elt, recv ? I2C_START_RECV : I2C_START_SEND);
             if (rv && !bus->broadcast) {
+                trace_i2c_start_transfer_err(node->elt->address, rv,
+                                             recv ? "RX" : "TX");
                 if (bus_scanned) {
                     /* First call, terminate the transfer. */
                     i2c_end_transfer(bus);
@@ -165,6 +172,8 @@ int i2c_start_transfer(I2CBus *bus, uint8_t address, int recv)
             }
         }
     }
+    trace_i2c_start_transfer_ok(address, bus->broadcast ? " broadcast" : "",
+                                recv ? "RX" : "TX");
     return 0;
 }
 
@@ -172,6 +181,8 @@ void i2c_end_transfer(I2CBus *bus)
 {
     I2CSlaveClass *sc;
     I2CNode *node, *next;
+
+    trace_i2c_end_transfer();
 
     QLIST_FOREACH_SAFE(node, &bus->current_devs, next, next) {
         sc = I2C_SLAVE_GET_CLASS(node->elt);
@@ -191,13 +202,14 @@ int i2c_send_recv(I2CBus *bus, uint8_t *data, bool send)
     int ret = 0;
 
     if (send) {
+        trace_i2c_send_start(*data);
         QLIST_FOREACH(node, &bus->current_devs, next) {
             sc = I2C_SLAVE_GET_CLASS(node->elt);
-            if (sc->send) {
-                ret = ret || sc->send(node->elt, *data);
-            } else {
-                ret = -1;
+            int err = sc->send ? sc->send(node->elt, *data) : -1;
+            if (err) {
+                trace_i2c_send_err(node->elt->address, err);
             }
+            ret |= err;
         }
         return ret ? -1 : 0;
     } else {
@@ -207,10 +219,13 @@ int i2c_send_recv(I2CBus *bus, uint8_t *data, bool send)
 
         sc = I2C_SLAVE_GET_CLASS(QLIST_FIRST(&bus->current_devs)->elt);
         if (sc->recv) {
-            ret = sc->recv(QLIST_FIRST(&bus->current_devs)->elt);
+            I2CNode *slave = QLIST_FIRST(&bus->current_devs);
+            ret = sc->recv(slave->elt);
             if (ret < 0) {
+                trace_i2c_recv_err(slave->elt->address, ret);
                 return ret;
             } else {
+                trace_i2c_recv_ok(ret);
                 *data = ret;
                 return 0;
             }
@@ -241,6 +256,7 @@ void i2c_nack(I2CBus *bus)
         return;
     }
 
+    trace_i2c_nack();
     QLIST_FOREACH(node, &bus->current_devs, next) {
         sc = I2C_SLAVE_GET_CLASS(node->elt);
         if (sc->event) {
