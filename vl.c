@@ -796,10 +796,10 @@ static time_t qemu_time(void)
 
 /***********************************************************/
 /* host time/date access */
-void qemu_get_timedate(struct tm *tm, int offset, const int *wday_offset)
+static
+void qemu_get_timedate_impl(struct tm *tm, time_t ti,
+                            int offset, const int *wday_offset)
 {
-    time_t ti = qemu_time();
-
     ti += offset;
     if (rtc_date_offset == -1) {
         if (rtc_utc)
@@ -810,11 +810,22 @@ void qemu_get_timedate(struct tm *tm, int offset, const int *wday_offset)
         ti -= rtc_date_offset;
         gmtime_r(&ti, tm);
     }
+    if (wday_offset) {
+        tm->tm_wday += *wday_offset;
+    }
+}
+
+void qemu_get_timedate(struct tm *tm, int offset, const int *wday_offset)
+{
+    time_t ti = qemu_time();
+    qemu_get_timedate_impl(tm, ti, offset, wday_offset);
 }
 
 int qemu_timedate_diff(const struct tm *tm, int *wday_offset)
 {
     time_t seconds;
+    int offset;
+    time_t ti = qemu_time();
 
     if (rtc_date_offset == -1)
         if (rtc_utc)
@@ -826,8 +837,14 @@ int qemu_timedate_diff(const struct tm *tm, int *wday_offset)
 	}
     else
         seconds = mktimegm(tm) + rtc_date_offset;
+    offset = seconds - ti;
+    if (wday_offset) {
+        struct tm rev;
 
-    return seconds - qemu_time();
+        qemu_get_timedate_impl(&rev, ti, offset, NULL);
+        *wday_offset = tm->tm_wday - rev.tm_wday;
+    }
+    return offset;
 }
 
 static void configure_rtc_date_offset(const char *startdate, int legacy)
