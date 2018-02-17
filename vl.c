@@ -796,7 +796,7 @@ static time_t qemu_time(void)
 
 /***********************************************************/
 /* host time/date access */
-void qemu_get_timedate(struct tm *tm, int offset)
+void qemu_get_timedate(struct tm *tm, int offset, const int *wday_offset)
 {
     time_t ti = qemu_time();
 
@@ -812,7 +812,7 @@ void qemu_get_timedate(struct tm *tm, int offset)
     }
 }
 
-int qemu_timedate_diff(const struct tm *tm)
+int qemu_timedate_diff(const struct tm *tm, int *wday_offset)
 {
     time_t seconds;
 

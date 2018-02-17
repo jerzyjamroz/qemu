@@ -2923,7 +2923,7 @@ static void omap_rtc_reset(struct omap_rtc_s *s)
     memset(&s->alarm_tm, 0, sizeof(s->alarm_tm));
     s->alarm_tm.tm_mday = 0x01;
     s->status = 1 << 7;
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     s->ti = mktimegm(&tm);
 
     omap_rtc_alarm_update(s);

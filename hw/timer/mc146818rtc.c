@@ -633,7 +633,7 @@ static void rtc_set_time(RTCState *s)
     s->base_rtc = mktimegm(&tm);
     s->last_update = qemu_clock_get_ns(rtc_clock);
 
-    qapi_event_send_rtc_change(qemu_timedate_diff(&tm), &error_abort);
+    qapi_event_send_rtc_change(qemu_timedate_diff(&tm, NULL), &error_abort);
 }
 
 static void rtc_set_cmos(RTCState *s, const struct tm *tm)
@@ -785,7 +785,7 @@ static void rtc_set_date_from_host(ISADevice *dev)
     RTCState *s = MC146818_RTC(dev);
     struct tm tm;
 
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
 
     s->base_rtc = mktimegm(&tm);
     s->last_update = qemu_clock_get_ns(rtc_clock);

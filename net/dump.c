@@ -130,7 +130,7 @@ static int net_dump_state_init(DumpState *s, const char *filename,
     s->fd = fd;
     s->pcap_caplen = len;
 
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     s->start_ts = mktime(&tm);
 
     return 0;

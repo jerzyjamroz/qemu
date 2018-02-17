@@ -32,8 +32,8 @@
 int qemu_main(int argc, char **argv, char **envp);
 #endif
 
-void qemu_get_timedate(struct tm *tm, int offset);
-int qemu_timedate_diff(const struct tm *tm);
+void qemu_get_timedate(struct tm *tm, int offset, const int *wday_offset);
+int qemu_timedate_diff(const struct tm *tm, int *wday_offset);
 
 #define qemu_isalnum(c)		isalnum((unsigned char)(c))
 #define qemu_isalpha(c)		isalpha((unsigned char)(c))

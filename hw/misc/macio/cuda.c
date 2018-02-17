@@ -907,7 +907,7 @@ static void cuda_realizefn(DeviceState *dev, Error **errp)
     s->timers[1].timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, cuda_timer2, s);
     s->timers[1].frequency = (SCALE_US * 6000) / 4700;
 
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     s->tick_offset = (uint32_t)mktimegm(&tm) + RTC_OFFSET;
 
     s->adb_poll_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, cuda_adb_poll, s);

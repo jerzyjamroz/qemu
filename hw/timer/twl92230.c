@@ -91,13 +91,13 @@ static inline void menelaus_rtc_stop(MenelausState *s)
 
 static void menelaus_rtc_update(MenelausState *s)
 {
-    qemu_get_timedate(&s->rtc.tm, s->rtc.sec_offset);
+    qemu_get_timedate(&s->rtc.tm, s->rtc.sec_offset, NULL);
 }
 
 static void menelaus_alm_update(MenelausState *s)
 {
     if ((s->rtc.ctrl & 3) == 3)
-        s->rtc.alm_sec = qemu_timedate_diff(&s->rtc.alm) - s->rtc.sec_offset;
+        s->rtc.alm_sec = qemu_timedate_diff(&s->rtc.alm, NULL) - s->rtc.sec_offset;
 }
 
 static void menelaus_rtc_hz(void *opaque)
@@ -619,7 +619,7 @@ static void menelaus_write(void *opaque, uint8_t addr, uint8_t value)
             s->status |= 1 << 10;				/* RTCERR */
             menelaus_update(s);
         }
-        s->rtc.sec_offset = qemu_timedate_diff(&tm);
+        s->rtc.sec_offset = qemu_timedate_diff(&tm, NULL);
         break;
     case MENELAUS_RTC_SEC:
         s->rtc.tm.tm_sec = from_bcd(value & 0x7f);

@@ -92,13 +92,13 @@ static void alarm_cb (void *opaque)
 	(NVRAM->buffer[0x1FF3] & 0x80) == 0 &&
 	(NVRAM->buffer[0x1FF2] & 0x80) == 0) {
         /* Repeat once a month */
-        qemu_get_timedate(&tm, NVRAM->time_offset);
+        qemu_get_timedate(&tm, NVRAM->time_offset, NULL);
         tm.tm_mon++;
         if (tm.tm_mon == 13) {
             tm.tm_mon = 1;
             tm.tm_year++;
         }
-        next_time = qemu_timedate_diff(&tm) - NVRAM->time_offset;
+        next_time = qemu_timedate_diff(&tm, NULL) - NVRAM->time_offset;
     } else if ((NVRAM->buffer[0x1FF5] & 0x80) != 0 &&
 	       (NVRAM->buffer[0x1FF4] & 0x80) == 0 &&
 	       (NVRAM->buffer[0x1FF3] & 0x80) == 0 &&
@@ -131,7 +131,7 @@ static void set_alarm(M48t59State *NVRAM)
     int diff;
     if (NVRAM->alrm_timer != NULL) {
         timer_del(NVRAM->alrm_timer);
-        diff = qemu_timedate_diff(&NVRAM->alarm) - NVRAM->time_offset;
+        diff = qemu_timedate_diff(&NVRAM->alarm, NULL) - NVRAM->time_offset;
         if (diff > 0)
             timer_mod(NVRAM->alrm_timer, diff * 1000);
     }
@@ -140,12 +140,12 @@ static void set_alarm(M48t59State *NVRAM)
 /* RTC management helpers */
 static inline void get_time(M48t59State *NVRAM, struct tm *tm)
 {
-    qemu_get_timedate(tm, NVRAM->time_offset);
+    qemu_get_timedate(tm, NVRAM->time_offset, NULL);
 }
 
 static void set_time(M48t59State *NVRAM, struct tm *tm)
 {
-    NVRAM->time_offset = qemu_timedate_diff(tm);
+    NVRAM->time_offset = qemu_timedate_diff(tm, NULL);
     set_alarm(NVRAM);
 }
 
@@ -639,7 +639,7 @@ void m48t59_realize_common(M48t59State *s, Error **errp)
         s->alrm_timer = timer_new_ns(rtc_clock, &alarm_cb, s);
         s->wd_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &watchdog_cb, s);
     }
-    qemu_get_timedate(&s->alarm, 0);
+    qemu_get_timedate(&s->alarm, 0, NULL);
 }
 
 static void m48t59_init1(Object *obj)

@@ -516,7 +516,7 @@ static void exynos4210_rtc_reset(DeviceState *d)
 {
     Exynos4210RTCState *s = EXYNOS4210_RTC(d);
 
-    qemu_get_timedate(&s->current_tm, 0);
+    qemu_get_timedate(&s->current_tm, 0, NULL);
 
     DPRINTF("Get time from host: %d-%d-%d %2d:%02d:%02d\n",
             s->current_tm.tm_year, s->current_tm.tm_mon, s->current_tm.tm_mday,

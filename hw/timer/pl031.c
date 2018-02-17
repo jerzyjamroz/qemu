@@ -204,7 +204,7 @@ static void pl031_init(Object *obj)
     sysbus_init_mmio(dev, &s->iomem);
 
     sysbus_init_irq(dev, &s->irq);
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     s->tick_offset = mktimegm(&tm) -
         qemu_clock_get_ns(rtc_clock) / NANOSECONDS_PER_SECOND;
 

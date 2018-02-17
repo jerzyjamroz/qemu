@@ -1116,7 +1116,7 @@ static void pxa2xx_rtc_init(Object *obj)
     s->rttr = 0x7fff;
     s->rtsr = 0;
 
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     wom = ((tm.tm_mday - 1) / 7) + 1;
 
     s->last_rcnr = (uint32_t) mktimegm(&tm);

@@ -251,7 +251,7 @@ static void s390_cpu_initfn(Object *obj)
     cs->exception_index = EXCP_HLT;
     s390_cpu_model_register_props(obj);
 #if !defined(CONFIG_USER_ONLY)
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     env->tod_offset = TOD_UNIX_EPOCH +
                       (time2tod(mktimegm(&tm)) * 1000000000ULL);
     env->tod_basetime = 0;

@@ -401,7 +401,7 @@ static uint64_t megasas_fw_time(void)
 {
     struct tm curtime;
 
-    qemu_get_timedate(&curtime, 0);
+    qemu_get_timedate(&curtime, 0, NULL);
     return ((uint64_t)curtime.tm_sec & 0xff) << 48 |
         ((uint64_t)curtime.tm_min & 0xff)  << 40 |
         ((uint64_t)curtime.tm_hour & 0xff) << 32 |

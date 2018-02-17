@@ -117,7 +117,7 @@ static void rtas_set_time_of_day(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     }
 
     /* Generate a monitor event for the change */
-    qapi_event_send_rtc_change(qemu_timedate_diff(&tm), &error_abort);
+    qapi_event_send_rtc_change(qemu_timedate_diff(&tm, NULL), &error_abort);
 
     host_ns = qemu_clock_get_ns(rtc_clock);
 
@@ -140,7 +140,7 @@ static void spapr_rtc_realize(DeviceState *dev, Error **errp)
 
     /* Initialize the RTAS RTC from host time */
 
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
     host_s = mktimegm(&tm);
     rtc_ns = qemu_clock_get_ns(rtc_clock);
     rtc->ns_offset = host_s * NANOSECONDS_PER_SECOND - rtc_ns;

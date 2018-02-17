@@ -390,7 +390,7 @@ static void strongarm_rtc_init(Object *obj)
     s->rttr = 0x0;
     s->rtsr = 0;
 
-    qemu_get_timedate(&tm, 0);
+    qemu_get_timedate(&tm, 0, NULL);
 
     s->last_rcnr = (uint32_t) mktimegm(&tm);
     s->last_hz = qemu_clock_get_ms(rtc_clock);
