@@ -132,7 +132,7 @@ char *qemu_strsep(char **input, const char *delim)
     return result;
 }
 
-time_t mktimegm(struct tm *tm)
+time_t mktimegm(const struct tm *tm)
 {
     time_t t;
     int y = tm->tm_year + 1900, m = tm->tm_mon + 1, d = tm->tm_mday;

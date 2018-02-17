@@ -812,7 +812,7 @@ void qemu_get_timedate(struct tm *tm, int offset)
     }
 }
 
-int qemu_timedate_diff(struct tm *tm)
+int qemu_timedate_diff(const struct tm *tm)
 {
     time_t seconds;
 
