@@ -74,13 +74,12 @@ typedef struct EVRState {
     bool pciint;
     bool linkup;
     bool linkupprev;
-    bool dbuf_ena;
 
     EVRFifoEntry fifo[512];
     unsigned fifo_in, fifo_out; /* buffer pointers */
 
-    uint32_t dbuf;
-    unsigned dbuf_in;
+    // next index in dbuf RX array to write
+    uint32_t dbuf_ptr;
 
     uint32_t evrreg[64*1024/4];
 
@@ -183,18 +182,15 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         }
         break;
     case 0x20: /* buffer rx */
-        if(val&0x00008000) {
-            s->dbuf_ena = 1;
-            s->dbuf = 0;
-            s->dbuf_in = 0;
+        val &= 0x0000d000;
+        if ((val&0xc000) == 0xc000) {
+            ERR(LOG_GUEST_ERROR, "Dbuf RX can't enable+disable");
         }
-        if(val&0x00004000) {
-            s->dbuf_ena = 0;
-            s->dbuf = 0;
-            s->dbuf_in = 0;
+        if(val&0x00004000) { // Stop
+            val &= 0x1000;
+            s->dbuf_ptr = 0;
         }
-        val &= 0x00001000;
-        val |= s->evrreg[addr>>2]&~0x00001000;
+        val |= s->evrreg[addr>>2]&~0x0000f000;
         break;
     }
 
@@ -294,32 +290,33 @@ void chr_link_read(void *opaque, const uint8_t *buf, int size)
                 DBGOUT(2,"Rx Event %02x DBus %02x", event, pbuf[3]);
             else {
                 DBGOUT(2,"Rx Event %02x Data %02x", event, pbuf[3]);
-                if(d->dbuf_ena && (d->evrreg[0x20>>2]&0x00001000)) {
-                    d->evrreg[0x20>>2] |= 0x00008000; /* receiving */
+                uint32_t rxctrl = d->evrreg[0x20>>2] & 0xd000;
+                //uint8_t *buf = (uint8_t*)&d->evrreg[(0x800>>2)];
+
+                if (rxctrl == 0x9000) {
+                    // enabled and receiving
 
                     if(pbuf[1]&0x4) {
                         DBGOUT(2," Start");
                         /* first byte */
-                        d->dbuf_in = 0;
-                        d->dbuf = 0;
+                        d->dbuf_ptr = 0;
                     }
-                    d->dbuf <<= 8;
-                    d->dbuf |= pbuf[3];
-                    d->dbuf_in++;
-                    d->dbuf_in &= 0x7ff;
 
-                    if((d->dbuf_in&0x3)==0 && d->dbuf_in!=0) {
-                        d->evrreg[(0x800>>2)+(d->dbuf_in>>2)-1] = d->dbuf;
-                        d->dbuf = 0;
+                    if(d->dbuf_ptr<0x800) {
+                        unsigned shift = ((d->dbuf_ptr^3)&3)*8;
+                        d->evrreg[(0x800 + d->dbuf_ptr)>>2] &= ~(0xff<<shift);
+                        d->evrreg[(0x800 + d->dbuf_ptr)>>2] |= ((uint32_t)pbuf[3])<<shift;
+                        d->dbuf_ptr++;
+                    } else {
+                        ERR(LOG_UNIMP, "Dbuf EVR msg too long\n");
                     }
+
                     if(pbuf[1]&0x08) {
                         DBGOUT(2," End");
                         /* last byte */
-                        d->evrreg[0x20>>2] &= ~0x00008fff; /* stop receiving and clear size */
-                        d->evrreg[0x20>>2] |=  0x00004000; /* ready */
-                        d->evrreg[0x20>>2] |=  d->dbuf_in;
+                        /* Mark ready, and store size */
+                        d->evrreg[0x20>>2] = 0x00005000 | d->dbuf_ptr;
                         d->evrreg[0x08>>2] |=  0x00000020;
-                        d->dbuf_ena = 0;
                         mrf_evr_update(d);
                     }
                 }
@@ -378,6 +375,8 @@ static void mrf_evr_reset(DeviceState *dev)
     EVRState *s = MRF_EVR(dev);
 
     DBGOUT(1,"In %s", __FUNCTION__);
+
+    memset(s->evrreg, 0, sizeof(s->evrreg));
 
     s->evrreg[0x00>>2] = 0x00010000; /* link violation */
     s->evrreg[0x50>>2] = 0x00000200; /* always show PLL locked */
