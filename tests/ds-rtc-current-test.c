@@ -28,7 +28,7 @@ void test_rtc_current(void)
 
     actual = time(NULL);
     /* new second may start here */
-    expected = rtc_gettime();
+    expected = rtc_gettime(NULL);
     g_assert_cmpuint(expected, <=, actual + max_delta);
     g_assert_cmpuint(expected, >=, actual);
 }

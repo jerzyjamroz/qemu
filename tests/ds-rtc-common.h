@@ -20,12 +20,15 @@ static uint8_t addr;
 static bool use_century;
 
 /* input buffer must have at least 7 elements */
-static inline time_t rtc_parse(const uint8_t *buf)
+static inline time_t rtc_parse(const uint8_t *buf, int *mmode)
 {
     struct tm parts;
 
     parts.tm_sec = from_bcd(buf[0]);
     parts.tm_min = from_bcd(buf[1]);
+    if (mmode) {
+        *mmode = !!(buf[2] & 0x40);
+    }
     if (buf[2] & 0x40) {
         /* 12 hour */
         /* HOUR register is 1-12. */
@@ -51,7 +54,7 @@ static inline time_t rtc_parse(const uint8_t *buf)
     return mktimegm(&parts);
 }
 
-static time_t rtc_gettime(void)
+static time_t rtc_gettime(int *mmode)
 {
     uint8_t buf[7];
 
@@ -61,7 +64,7 @@ static time_t rtc_gettime(void)
     /* read back current time registers */
     i2c_recv(i2c, addr, buf, 7);
 
-    return rtc_parse(buf);
+    return rtc_parse(buf, mmode);
 }
 
 #endif /* DSRTCCOMMON_H */
