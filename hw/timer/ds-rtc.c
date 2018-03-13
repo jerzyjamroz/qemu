@@ -70,6 +70,7 @@ typedef struct DSRTCState {
 typedef struct DSRTCClass {
     I2CSlaveClass parent_obj;
 
+    bool has_century;
     /* actual address space size must be <= NVRAM_SIZE */
     unsigned addr_size;
     unsigned ctrl_offset;
@@ -93,6 +94,7 @@ static const VMStateDescription vmstate_dsrtc = {
 
 static void capture_current_time(DSRTCState *s)
 {
+    DSRTCClass *k = DSRTC_GET_CLASS(s);
     /* Capture the current time into the secondary registers
      * which will be actually read by the data transfer operation.
      */
@@ -125,7 +127,10 @@ static void capture_current_time(DSRTCState *s)
     }
     s->nvram[R_DATE] = to_bcd(now.tm_mday);
     s->nvram[R_MONTH] = to_bcd(now.tm_mon + 1);
-    s->nvram[R_YEAR] = to_bcd(now.tm_year - 100);
+    s->nvram[R_YEAR] = to_bcd(now.tm_year % 100u);
+
+    ARRAY_FIELD_DP32(s->nvram, MONTH, CENTURY,
+                     k->has_century && now.tm_year >= 100)
 }
 
 static void inc_regptr(DSRTCState *s)
@@ -282,6 +287,7 @@ static void ds1338_class_init(ObjectClass *klass, void *data)
 {
     DSRTCClass *k = DSRTC_CLASS(klass);
 
+    k->has_century = false;
     k->addr_size = 0x40;
     k->ctrl_offset = R_DS1338_CTRL;
     k->ctrl_write = ds1338_control_write;
