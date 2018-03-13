@@ -21,8 +21,6 @@
  */
 #define NVRAM_SIZE 64
 
-#define CTRL_OSF   0x20
-
 #define TYPE_DSRTC "ds1338"
 #define DSRTC(obj) OBJECT_CHECK(DSRTCState, (obj), TYPE_DSRTC)
 
@@ -216,13 +214,11 @@ static int dsrtc_send(I2CSlave *i2c, uint8_t data)
     if (s->ptr == R_CTRL) {
         /* Control register. */
 
-        /* Ensure bits 2, 3 and 6 will read back as zero. */
-        data &= 0xB3;
-
-        /* Attempting to write the OSF flag to logic 1 leaves the
-           value unchanged. */
-        data = (data & ~CTRL_OSF) | (data & s->nvram[s->ptr] & CTRL_OSF);
-
+        /* Allow guest to set no-op controls for clock out pin and
+         * rate select.  Ignore write 1 to clear OSF.  We don't model
+         * oscillator stop, so it is never set.
+         */
+        data = data & 0x93;
     }
     s->nvram[s->ptr] = data;
     if (s->ptr <= R_YEAR) {
