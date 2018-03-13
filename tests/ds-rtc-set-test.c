@@ -124,17 +124,19 @@ void test_rtc_set(const void *raw)
 
     const uint8_t *testtime = raw;
     time_t expected, actual;
+    unsigned wday_expect, wday_actual;
     int mode_expect, mode_actual;
 
     /* skip address pointer and parse remainder */
-    expected = rtc_parse(&testtime[1], &mode_expect);
+    expected = rtc_parse(&testtime[1], &wday_expect, &mode_expect);
 
     i2c_send(i2c, addr, testtime, 8);
     /* host may start new second here */
-    actual = rtc_gettime(&mode_actual);
+    actual = rtc_gettime(&wday_actual, &mode_actual);
 
     g_assert_cmpuint(expected, <=, actual);
     g_assert_cmpuint(expected + max_delta, >=, actual);
+    g_assert_cmpuint(wday_expect, ==, wday_actual);
     g_assert_cmpint(mode_expect, ==, mode_actual);
 }
 
