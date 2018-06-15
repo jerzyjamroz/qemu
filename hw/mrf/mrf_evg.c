@@ -206,7 +206,7 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
 {
     EVGState *s = opaque;
     if(s->evgbe)
-        val = __bswap_32(val);
+        val = bswap32(val);
 
     if(addr>=0x1200 && addr<0x1400)
         return; /* SFP info, RO */
@@ -333,7 +333,7 @@ evg_mmio_read(void *opaque, hwaddr addr, unsigned size)
     ret = s->evgreg[addr>>2];
 
     if(s->evgbe)
-        ret = __bswap_32(ret);
+        ret = bswap32(ret);
     return ret;
 }
 
