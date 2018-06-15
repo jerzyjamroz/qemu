@@ -151,7 +151,7 @@ void sis_acquire(SISState *state)
              * and DMA start.
              */
             if(bswap)
-                samp = __bswap_16(samp);
+                samp = bswap16(samp);
             *next = samp;
         }
 
