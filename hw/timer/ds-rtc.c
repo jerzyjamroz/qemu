@@ -21,8 +21,10 @@
  */
 #define NVRAM_SIZE 64
 
-#define TYPE_DSRTC "ds1338"
+#define TYPE_DSRTC "dsrtc"
 #define DSRTC(obj) OBJECT_CHECK(DSRTCState, (obj), TYPE_DSRTC)
+#define DSRTC_CLASS(klass) OBJECT_CLASS_CHECK(DSRTCClass, (klass), TYPE_DSRTC)
+#define DSRTC_GET_CLASS(obj) OBJECT_GET_CLASS(DSRTCClass, (obj), TYPE_DSRTC)
 
 /* values stored in BCD */
 /* 00-59 */
@@ -38,7 +40,7 @@
 /* 0-99 */
 #define R_YEAR  (0x6)
 
-#define R_CTRL  (0x7)
+#define R_DS1338_CTRL (0x7)
 
 /* use 12 hour mode when set */
 FIELD(HOUR, SET12, 6, 1)
@@ -64,6 +66,15 @@ typedef struct DSRTCState {
     int32_t ptr;
     bool addr_byte;
 } DSRTCState;
+
+typedef struct DSRTCClass {
+    I2CSlaveClass parent_obj;
+
+    /* actual address space size must be <= NVRAM_SIZE */
+    unsigned addr_size;
+    unsigned ctrl_offset;
+    void (*ctrl_write)(DSRTCState *s, uint8_t);
+} DSRTCClass;
 
 static const VMStateDescription vmstate_dsrtc = {
     .name = "ds1338",
@@ -119,11 +130,12 @@ static void capture_current_time(DSRTCState *s)
 
 static void inc_regptr(DSRTCState *s)
 {
-    /* The register pointer wraps around after 0x3F; wraparound
+    DSRTCClass *k = DSRTC_GET_CLASS(s);
+    /* The register pointer wraps around after k->addr_size-1; wraparound
      * causes the current time/date to be retransferred into
      * the secondary registers.
      */
-    s->ptr = (s->ptr + 1) & (NVRAM_SIZE - 1);
+    s->ptr = (s->ptr + 1) % k->addr_size;
     if (!s->ptr) {
         capture_current_time(s);
     }
@@ -205,20 +217,15 @@ static void dsrtc_update(DSRTCState *s)
 static int dsrtc_send(I2CSlave *i2c, uint8_t data)
 {
     DSRTCState *s = DSRTC(i2c);
+    DSRTCClass *k = DSRTC_GET_CLASS(s);
 
     if (s->addr_byte) {
-        s->ptr = data & (NVRAM_SIZE - 1);
+        s->ptr = data % k->addr_size;
         s->addr_byte = false;
         return 0;
     }
-    if (s->ptr == R_CTRL) {
-        /* Control register. */
-
-        /* Allow guest to set no-op controls for clock out pin and
-         * rate select.  Ignore write 1 to clear OSF.  We don't model
-         * oscillator stop, so it is never set.
-         */
-        data = data & 0x93;
+    if (s->ptr == k->ctrl_offset) {
+        (k->ctrl_write)(s, data);
     }
     s->nvram[s->ptr] = data;
     if (s->ptr <= R_YEAR) {
@@ -253,15 +260,44 @@ static void dsrtc_class_init(ObjectClass *klass, void *data)
 }
 
 static const TypeInfo dsrtc_info = {
+    .abstract      = true,
     .name          = TYPE_DSRTC,
     .parent        = TYPE_I2C_SLAVE,
     .instance_size = sizeof(DSRTCState),
     .class_init    = dsrtc_class_init,
 };
 
+static void ds1338_control_write(DSRTCState *s, uint8_t data)
+{
+    /* Control register. */
+
+    /* Allow guest to set no-op controls for clock out pin and
+     * rate select.  Ignore write 1 to clear OSF.  We don't model
+     * oscillator stop, so it is never set.
+     */
+    s->nvram[R_DS1338_CTRL] = data & 0x93;
+}
+
+static void ds1338_class_init(ObjectClass *klass, void *data)
+{
+    DSRTCClass *k = DSRTC_CLASS(klass);
+
+    k->addr_size = 0x40;
+    k->ctrl_offset = R_DS1338_CTRL;
+    k->ctrl_write = ds1338_control_write;
+}
+
+static const TypeInfo ds1338_info = {
+    .name          = "ds1338",
+    .parent        = TYPE_DSRTC,
+    .class_size    = sizeof(DSRTCClass),
+    .class_init    = ds1338_class_init,
+};
+
 static void dsrtc_register_types(void)
 {
     type_register_static(&dsrtc_info);
+    type_register_static(&ds1338_info);
 }
 
 type_init(dsrtc_register_types)
