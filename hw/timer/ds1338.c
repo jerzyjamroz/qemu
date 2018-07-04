@@ -89,9 +89,13 @@ static void capture_current_time(DS1338State *s)
      */
     struct tm now;
     qemu_get_timedate(&now, s->offset);
+
     s->nvram[R_SEC] = to_bcd(now.tm_sec);
     s->nvram[R_MIN] = to_bcd(now.tm_min);
     if (ARRAY_FIELD_EX32(s->nvram, HOUR, SET12)) {
+        /* 12 hour mode.
+         * map 0-23 to 1-12 am/pm
+         */
         int tmp = now.tm_hour;
         if (tmp % 12 == 0) {
             tmp += 12;
@@ -101,7 +105,9 @@ static void capture_current_time(DS1338State *s)
         } else {
             s->nvram[R_HOUR] = R_HOUR_SET12_MASK | R_HOUR_AMPM_MASK | to_bcd(tmp - 12);
         }
+
     } else {
+        /* 24 hour mode. */
         s->nvram[R_HOUR] = to_bcd(now.tm_hour);
     }
     s->nvram[R_WDAY] = (now.tm_wday + s->wday_offset) % 7 + 1;
@@ -178,14 +184,13 @@ static int ds1338_send(I2CSlave *i2c, uint8_t data)
             break;
         case R_HOUR:
             if (FIELD_EX32(data, HOUR, SET12)) {
-                int tmp = from_bcd(FIELD_EX32(data, HOUR, HOUR12));
+                /* 12 hour (1-12) */
+                /* read and wrap 1-12 -> 0-11 */
+                now.tm_hour = from_bcd(FIELD_EX32(data, HOUR, HOUR12)) % 12u;
                 if (FIELD_EX32(data, HOUR, AMPM)) {
-                    tmp += 12;
+                    now.tm_hour += 12;
                 }
-                if (tmp % 12 == 0) {
-                    tmp -= 12;
-                }
-                now.tm_hour = tmp;
+
             } else {
                 now.tm_hour = from_bcd(FIELD_EX32(data, HOUR, HOUR24));
             }
