@@ -309,6 +309,11 @@ static void bootp_reply(Slirp *slirp, const struct bootp_t *bp)
                 q += val;
             }
         }
+
+        *q++ = 129;
+        *q++ = strlen("INIT=/TFTP/BOOTP_HOST/md.sys");
+        strcpy((char*)q, "INIT=/TFTP/BOOTP_HOST/md.sys");
+        q += strlen("INIT=/TFTP/BOOTP_HOST/md.sys")+1;
     } else {
         static const char nak_msg[] = "requested address not available";
 
