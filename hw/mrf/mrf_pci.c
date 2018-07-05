@@ -342,12 +342,36 @@ static const TypeInfo mrf_evg_300_info = {
     },
 };
 
+static
+mrf_pci_info mtca_evm_300_info = {
+    .core = "mrf-evm",
+    .desc = "Micro Research mTCA-EVM-300",
+    .vendor_id = 0x10ee, /* Xilinx */
+    .device_id = 0x7011,
+    .subsystem_vendor_id = 0x1a3e,
+    .subsystem_id = 0x232c,
+    .class_id = 0x1180,
+    .mrf_type = 0x8,
+};
+
+static const TypeInfo mrf_evm_300_info = {
+    .name          = "mtca-evm-300",
+    .parent        = TYPE_MRF_PCI,
+    .class_init    = mrf_pci_class_init,
+    .class_data    = &mtca_evm_300_info,
+    .interfaces = (InterfaceInfo[]) {
+        { INTERFACE_PCIE_DEVICE },
+        { },
+    },
+};
+
 static void mrf_pci_register_types(void) {
     type_register_static(&mrf_pci_base_info);
     type_register_static(&mrf_evr_230_info);
     type_register_static(&mrf_evr_300_info);
     type_register_static(&mrf_evg_230_info);
     type_register_static(&mrf_evg_300_info);
+    type_register_static(&mrf_evm_300_info);
 }
 
 type_init(mrf_pci_register_types)

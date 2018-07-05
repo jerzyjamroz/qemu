@@ -1,5 +1,6 @@
 obj-$(CONFIG_PCI) += mrf_core.o
 obj-$(CONFIG_PCI) += mrf_evg.o
 obj-$(CONFIG_PCI) += mrf_evr.o
+obj-$(CONFIG_PCI) += mrf_evm.o
 obj-$(CONFIG_PCI) += mrf_pci.o
 obj-$(CONFIG_VME) += mrf_vme.o

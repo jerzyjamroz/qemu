@@ -404,10 +404,27 @@ static const TypeInfo mrf_evg_230_info = {
     .class_data    = &vme_evg_230_info,
 };
 
+static mrf_vme_info vme_evm_300_info = {
+    .core = "mrf-evm",
+    .desc = "Micro Research VME-EVM-300",
+    .vendor_id = 0x000eb2,
+    .board_id = 0x4547012c,
+    .revision = 0,
+    .mrf_type = 0x28,
+};
+
+static const TypeInfo mrf_evm_300_info = {
+    .name          = "vme-evm-300",
+    .parent        = TYPE_MRF_VME,
+    .class_init    = mrf_vme_class_init,
+    .class_data    = &vme_evm_300_info,
+};
+
 static void mrf_vme_register_types(void) {
     type_register_static(&mrf_vme_base_info);
     type_register_static(&mrf_evr_230_info);
     type_register_static(&mrf_evg_230_info);
+    type_register_static(&mrf_evm_300_info);
 }
 
 type_init(mrf_vme_register_types)
