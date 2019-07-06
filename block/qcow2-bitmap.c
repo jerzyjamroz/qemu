@@ -110,7 +110,7 @@ static int update_header_sync(BlockDriverState *bs)
         return ret;
     }
 
-    return bdrv_flush(bs);
+    return bdrv_flush(bs->file->bs);
 }
 
 static inline void bitmap_table_to_be(uint64_t *bitmap_table, size_t size)
@@ -413,8 +413,8 @@ static inline void bitmap_dir_entry_to_be(Qcow2BitmapDirEntry *entry)
 
 static inline int calc_dir_entry_size(size_t name_size, size_t extra_data_size)
 {
-    return align_offset(sizeof(Qcow2BitmapDirEntry) +
-                        name_size + extra_data_size, 8);
+    int size = sizeof(Qcow2BitmapDirEntry) + name_size + extra_data_size;
+    return ROUND_UP(size, 8);
 }
 
 static inline int dir_entry_size(Qcow2BitmapDirEntry *entry)
@@ -882,7 +882,7 @@ static int update_ext_header_and_dir(BlockDriverState *bs,
             return ret;
         }
 
-        ret = bdrv_flush(bs->file->bs);
+        ret = qcow2_flush_caches(bs);
         if (ret < 0) {
             goto fail;
         }
@@ -1004,13 +1004,18 @@ fail:
     return false;
 }
 
-int qcow2_reopen_bitmaps_rw(BlockDriverState *bs, Error **errp)
+int qcow2_reopen_bitmaps_rw_hint(BlockDriverState *bs, bool *header_updated,
+                                 Error **errp)
 {
     BDRVQcow2State *s = bs->opaque;
     Qcow2BitmapList *bm_list;
     Qcow2Bitmap *bm;
     GSList *ro_dirty_bitmaps = NULL;
     int ret = 0;
+
+    if (header_updated != NULL) {
+        *header_updated = false;
+    }
 
     if (s->nb_bitmaps == 0) {
         /* No bitmaps - nothing to do */
@@ -1055,6 +1060,9 @@ int qcow2_reopen_bitmaps_rw(BlockDriverState *bs, Error **errp)
             error_setg_errno(errp, -ret, "Can't update bitmap directory");
             goto out;
         }
+        if (header_updated != NULL) {
+            *header_updated = true;
+        }
         g_slist_foreach(ro_dirty_bitmaps, set_readonly_helper, false);
     }
 
@@ -1063,6 +1071,11 @@ out:
     bitmap_list_free(bm_list);
 
     return ret;
+}
+
+int qcow2_reopen_bitmaps_rw(BlockDriverState *bs, Error **errp)
+{
+    return qcow2_reopen_bitmaps_rw_hint(bs, NULL, errp);
 }
 
 /* store_bitmap_data()

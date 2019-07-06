@@ -392,8 +392,7 @@ static uint32_t dcr_read_sdr(void *opaque, int dcrn)
     case SDR0_CFGDATA:
         switch (sdr->addr) {
         case SDR0_STRP0:
-            /* FIXME: Is this correct? This breaks timing in U-Boot */
-            ret = 0; /*(0xb5 << 8) | (1 << 4) | 9 */
+            ret = (0xb5 << 8) | (1 << 4) | 9;
             break;
         case SDR0_STRP1:
             ret = (5 << 29) | (2 << 26) | (1 << 24);
@@ -1050,6 +1049,9 @@ static void ppc460ex_pcie_realize(DeviceState *dev, Error **errp)
     case DCRN_PCIE1_BASE:
         id = 1;
         break;
+    default:
+        error_setg(errp, "invalid PCIe DCRN base");
+        return;
     }
     snprintf(buf, sizeof(buf), "pcie%d-io", id);
     memory_region_init(&s->iomem, OBJECT(s), buf, UINT64_MAX);

@@ -35,10 +35,10 @@
 #include "qemu/timer.h"
 #include "qemu/acl.h"
 #include "qemu/config-file.h"
+#include "qapi/qapi-events.h"
 #include "qapi/error.h"
-#include "qmp-commands.h"
+#include "qapi/qapi-commands-ui.h"
 #include "ui/input.h"
-#include "qapi-event.h"
 #include "crypto/hash.h"
 #include "crypto/tlscredsanon.h"
 #include "crypto/tlscredsx509.h"
@@ -746,8 +746,18 @@ static void vnc_update_server_surface(VncDisplay *vd)
 static void vnc_dpy_switch(DisplayChangeListener *dcl,
                            DisplaySurface *surface)
 {
+    static const char placeholder_msg[] =
+        "Display output is not active.";
+    static DisplaySurface *placeholder;
     VncDisplay *vd = container_of(dcl, VncDisplay, dcl);
     VncState *vs;
+
+    if (surface == NULL) {
+        if (placeholder == NULL) {
+            placeholder = qemu_create_message_surface(640, 480, placeholder_msg);
+        }
+        surface = placeholder;
+    }
 
     vnc_abort_display_jobs(vd);
     vd->ds = surface;
@@ -1734,7 +1744,8 @@ static void reset_keys(VncState *vs)
 
 static void press_key(VncState *vs, int keysym)
 {
-    int keycode = keysym2scancode(vs->vd->kbd_layout, keysym) & SCANCODE_KEYMASK;
+    int keycode = keysym2scancode(vs->vd->kbd_layout, keysym,
+                                  false, false, false) & SCANCODE_KEYMASK;
     qemu_input_event_send_key_number(vs->vd->dcl.con, keycode, true);
     qemu_input_event_send_key_delay(vs->vd->key_delay_ms);
     qemu_input_event_send_key_number(vs->vd->dcl.con, keycode, false);
@@ -1993,6 +2004,9 @@ static const char *code2name(int keycode)
 
 static void key_event(VncState *vs, int down, uint32_t sym)
 {
+    bool shift = vs->modifiers_state[0x2a] || vs->modifiers_state[0x36];
+    bool altgr = vs->modifiers_state[0xb8];
+    bool ctrl  = vs->modifiers_state[0x1d] || vs->modifiers_state[0x9d];
     int keycode;
     int lsym = sym;
 
@@ -2000,7 +2014,8 @@ static void key_event(VncState *vs, int down, uint32_t sym)
         lsym = lsym - 'A' + 'a';
     }
 
-    keycode = keysym2scancode(vs->vd->kbd_layout, lsym & 0xFFFF) & SCANCODE_KEYMASK;
+    keycode = keysym2scancode(vs->vd->kbd_layout, lsym & 0xFFFF,
+                              shift, altgr, ctrl) & SCANCODE_KEYMASK;
     trace_vnc_key_event_map(down, sym, keycode, code2name(keycode));
     do_key_event(vs, down, keycode, sym);
 }

@@ -645,7 +645,7 @@ static int nvme_init(BlockDriverState *bs, const char *device, int namespace,
     aio_set_event_notifier(bdrv_get_aio_context(bs), &s->irq_notifier,
                            false, nvme_handle_event, nvme_poll_cb);
 
-    nvme_identify(bs, namespace, errp);
+    nvme_identify(bs, namespace, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         ret = -EIO;
@@ -666,8 +666,12 @@ fail_queue:
     nvme_free_queue_pair(bs, s->queues[0]);
 fail:
     g_free(s->queues);
-    qemu_vfio_pci_unmap_bar(s->vfio, 0, (void *)s->regs, 0, NVME_BAR_SIZE);
-    qemu_vfio_close(s->vfio);
+    if (s->regs) {
+        qemu_vfio_pci_unmap_bar(s->vfio, 0, (void *)s->regs, 0, NVME_BAR_SIZE);
+    }
+    if (s->vfio) {
+        qemu_vfio_close(s->vfio);
+    }
     event_notifier_cleanup(&s->irq_notifier);
     return ret;
 }
@@ -691,12 +695,11 @@ static void nvme_parse_filename(const char *filename, QDict *options,
         unsigned long ns;
         const char *slash = strchr(tmp, '/');
         if (!slash) {
-            qdict_put(options, NVME_BLOCK_OPT_DEVICE,
-                      qstring_from_str(tmp));
+            qdict_put_str(options, NVME_BLOCK_OPT_DEVICE, tmp);
             return;
         }
         device = g_strndup(tmp, slash - tmp);
-        qdict_put(options, NVME_BLOCK_OPT_DEVICE, qstring_from_str(device));
+        qdict_put_str(options, NVME_BLOCK_OPT_DEVICE, device);
         g_free(device);
         namespace = slash + 1;
         if (*namespace && qemu_strtoul(namespace, NULL, 10, &ns)) {
@@ -704,8 +707,8 @@ static void nvme_parse_filename(const char *filename, QDict *options,
                        namespace);
             return;
         }
-        qdict_put(options, NVME_BLOCK_OPT_NAMESPACE,
-                  qstring_from_str(*namespace ? namespace : "1"));
+        qdict_put_str(options, NVME_BLOCK_OPT_NAMESPACE,
+                      *namespace ? namespace : "1");
     }
 }
 
@@ -1068,18 +1071,6 @@ static int nvme_reopen_prepare(BDRVReopenState *reopen_state,
     return 0;
 }
 
-static int64_t coroutine_fn nvme_co_get_block_status(BlockDriverState *bs,
-                                                     int64_t sector_num,
-                                                     int nb_sectors, int *pnum,
-                                                     BlockDriverState **file)
-{
-    *pnum = nb_sectors;
-    *file = bs;
-
-    return BDRV_BLOCK_ALLOCATED | BDRV_BLOCK_OFFSET_VALID |
-           (sector_num << BDRV_SECTOR_BITS);
-}
-
 static void nvme_refresh_filename(BlockDriverState *bs, QDict *opts)
 {
     QINCREF(opts);
@@ -1090,7 +1081,7 @@ static void nvme_refresh_filename(BlockDriverState *bs, QDict *opts)
                  bs->drv->format_name);
     }
 
-    qdict_put(opts, "driver", qstring_from_str(bs->drv->format_name));
+    qdict_put_str(opts, "driver", bs->drv->format_name);
     bs->full_open_options = opts;
 }
 
@@ -1178,8 +1169,6 @@ static BlockDriver bdrv_nvme = {
     .bdrv_co_pwritev          = nvme_co_pwritev,
     .bdrv_co_flush_to_disk    = nvme_co_flush,
     .bdrv_reopen_prepare      = nvme_reopen_prepare,
-
-    .bdrv_co_get_block_status = nvme_co_get_block_status,
 
     .bdrv_refresh_filename    = nvme_refresh_filename,
     .bdrv_refresh_limits      = nvme_refresh_limits,

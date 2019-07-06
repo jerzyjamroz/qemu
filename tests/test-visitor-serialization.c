@@ -23,7 +23,6 @@
 #include "qapi/qobject-output-visitor.h"
 #include "qapi/string-input-visitor.h"
 #include "qapi/string-output-visitor.h"
-#include "qapi-visit.h"
 #include "qapi/dealloc-visitor.h"
 
 enum PrimitiveTypeKind {
@@ -1116,7 +1115,7 @@ static const SerializeOps visitors[] = {
 
 static void add_visitor_type(const SerializeOps *ops)
 {
-    char testname_prefix[128];
+    char testname_prefix[32];
     char testname[128];
     TestArgs *args;
     int i = 0;

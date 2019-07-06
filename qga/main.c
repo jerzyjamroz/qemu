@@ -25,7 +25,7 @@
 #include "qapi/qmp/qstring.h"
 #include "qga/guest-agent-core.h"
 #include "qemu/module.h"
-#include "qga-qmp-commands.h"
+#include "qga-qapi-commands.h"
 #include "qapi/qmp/qerror.h"
 #include "qapi/error.h"
 #include "qga/channel.h"
@@ -218,7 +218,7 @@ static void usage(const char *cmd)
 {
     printf(
 "Usage: %s [-m <method> -p <path>] [<options>]\n"
-"QEMU Guest Agent " QEMU_VERSION QEMU_PKGVERSION "\n"
+"QEMU Guest Agent " QEMU_FULL_VERSION "\n"
 QEMU_COPYRIGHT "\n"
 "\n"
 "  -m, --method      transport method: one of unix-listen, virtio-serial,\n"
@@ -607,7 +607,7 @@ static void process_event(JSONMessageParser *parser, GQueue *tokens)
     g_assert(s && parser);
 
     g_debug("process_event: called");
-    qdict = qobject_to_qdict(json_parser_parse_err(tokens, NULL, &err));
+    qdict = qobject_to(QDict, json_parser_parse_err(tokens, NULL, &err));
     if (err || !qdict) {
         QDECREF(qdict);
         qdict = qdict_new();

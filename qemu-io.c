@@ -504,7 +504,7 @@ int main(int argc, char **argv)
 #endif
 
     module_call_init(MODULE_INIT_TRACE);
-    progname = basename(argv[0]);
+    progname = g_path_get_basename(argv[0]);
     qemu_init_exec_dir(argv[0]);
 
     qcrypto_init(&error_fatal);
@@ -558,7 +558,7 @@ int main(int argc, char **argv)
             trace_file = trace_opt_parse(optarg);
             break;
         case 'V':
-            printf("%s version " QEMU_VERSION QEMU_PKGVERSION "\n"
+            printf("%s version " QEMU_FULL_VERSION "\n"
                    QEMU_COPYRIGHT "\n", progname);
             exit(0);
         case 'h':
