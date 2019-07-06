@@ -68,6 +68,7 @@ ALLOWED_TYPES = [
     "ssize_t",
     "uintptr_t",
     "ptrdiff_t",
+    "hwaddr",
     # Magic substitution is done by tracetool
     "TCGv",
 ]
