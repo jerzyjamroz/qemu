@@ -33,6 +33,7 @@
 #include "hw/sysbus.h"
 #include "hw/char/serial.h"
 #include "hw/ppc/openpic.h"
+#include "hw/ppc/openpic_kvm.h"
 
 /* E500_ denotes registers common to all */
 /* Some CCSR offsets duplicated in e500.c */

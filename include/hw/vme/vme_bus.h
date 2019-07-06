@@ -9,7 +9,6 @@
 #ifndef VME_BUS_H
 #define VME_BUS_H
 
-#include <hw/hw.h>
 
 #define TYPE_VME_BUS "vme-bus"
 #define VME_BUS(i) OBJECT_CHECK(VMEBus, i, TYPE_VME_BUS)
