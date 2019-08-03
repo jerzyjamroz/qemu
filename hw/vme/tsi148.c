@@ -737,6 +737,7 @@ void do_dma(TSI148State *tsi, unsigned eng)
 {
     uint32_t ctrl = tsi->REG(R_DCTL(eng));
     dma_desc D;
+    D.pnext = 0;
 
     DBGOUT("DMA%c Start", '0' + eng);
     tsi->REG(R_DSTA(eng)) = 1 << 24; /* BUSY */
