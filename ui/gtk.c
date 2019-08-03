@@ -1925,9 +1925,9 @@ static GSList *gd_vc_vte_init(GtkDisplayState *s, VirtualConsole *vc,
      * 7-bit ASCII at least in VTE 0.38.
      */
 #if VTE_CHECK_VERSION(0, 38, 0)
-    vte_terminal_set_encoding(VTE_TERMINAL(vc->vte.terminal), "UTF-8", NULL);
+//    vte_terminal_set_encoding(VTE_TERMINAL(vc->vte.terminal), "UTF-8", NULL);
 #else
-    vte_terminal_set_encoding(VTE_TERMINAL(vc->vte.terminal), "UTF-8");
+//    vte_terminal_set_encoding(VTE_TERMINAL(vc->vte.terminal), "UTF-8");
 #endif
 
     vte_terminal_set_scrollback_lines(VTE_TERMINAL(vc->vte.terminal), -1);
