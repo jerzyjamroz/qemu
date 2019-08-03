@@ -163,6 +163,7 @@ static void setup_boot(MachineState *machine, int version, size_t ram_size)
         binfo.initrd_filename = machine->initrd_filename;
     }
 
+    ARM_CPU(first_cpu)->env.boot_info = &binfo;
     arm_load_kernel(ARM_CPU(first_cpu), &binfo);
 }
 
