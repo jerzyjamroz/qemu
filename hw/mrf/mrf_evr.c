@@ -61,7 +61,8 @@ typedef struct EVRState {
     qemu_irq irq;
 
     /* evr */
-    uint8_t mrftype, fwversion;
+    uint8_t mrftype;
+    uint32_t fwversion;
     /* bus bridge type
      * 0 - external PCI, LE byte order, ignore PCI IRQ mask
      * 1 - internal PCI, we manage byte order and honor PCI IRQ mask
@@ -178,7 +179,7 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         if(s->bridgetype==1 && s->fwversion>=0xa) {
             s->pciint = !!(val&0x40000000);
         } else {
-            ERR(LOG_GUEST_ERROR, "PCI MIE not available with FW version %u", s->fwversion);
+            ERR(LOG_GUEST_ERROR, "PCI MIE not available with FW version 0x%06x", s->fwversion);
         }
         break;
     case 0x20: /* buffer rx */
@@ -439,7 +440,7 @@ void mrf_evr_realize(DeviceState *dev, Error **errp)
 static Property mrfevrport_properties[] = {
     DEFINE_PROP_UINT8("bridge-type", EVRState, bridgetype, 0),
     DEFINE_PROP_UINT8("mrf-type", EVRState, mrftype, 1),
-    DEFINE_PROP_UINT8("version", EVRState, fwversion, 6),
+    DEFINE_PROP_UINT32("version", EVRState, fwversion, 6),
     DEFINE_PROP_CHR("chardev", EVRState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };

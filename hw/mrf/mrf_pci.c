@@ -62,7 +62,7 @@ typedef struct MRFPCIState {
     BusState *sbus;
     MRFCore *core;
 
-    uint8_t fwversion;
+    uint32_t fwversion;
 
     /* plx 9030 */
     unsigned int irqena:1;
@@ -177,7 +177,7 @@ void mrf_pci_realize(PCIDevice *pci_dev, Error **perr)
     DBGOUT("core is %s", object_get_canonical_path(OBJECT(coredev)));
 
     qdev_prop_set_uint8(coredev, "mrf-type", k->info->mrf_type);
-    qdev_prop_set_uint8(coredev, "version", d->fwversion);
+    qdev_prop_set_uint32(coredev, "version", d->fwversion);
 
     if(chr) {
         /* transfer the chardev to the core device */
@@ -211,7 +211,7 @@ void mrf_pci_realize(PCIDevice *pci_dev, Error **perr)
 }
 
 static Property mrfpci_properties[] = {
-    DEFINE_PROP_UINT8("version", MRFPCIState, fwversion, 6),
+    DEFINE_PROP_UINT32("version", MRFPCIState, fwversion, 6),
     DEFINE_PROP_CHR("chardev", MRFPCIState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };

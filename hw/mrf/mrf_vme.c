@@ -67,7 +67,7 @@ typedef struct MRFVMEState {
     BusState *sbus;
     MRFCore *core;
 
-    uint8_t fwversion;
+    uint32_t fwversion;
 
 } MRFVMEState;
 
@@ -87,7 +87,7 @@ typedef struct MRFVMEClass {
 } MRFVMEClass;
 
 static Property mrfvme_properties[] = {
-    DEFINE_PROP_UINT8("version", MRFVMEState, fwversion, 6),
+    DEFINE_PROP_UINT32("version", MRFVMEState, fwversion, 6),
     DEFINE_PROP_CHR("chardev", MRFVMEState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };
@@ -270,7 +270,7 @@ static void mrf_vme_realize(struct VMEDevice *dev, Error **errp)
     DBGOUT("core is %s", object_get_canonical_path(OBJECT(coredev)));
 
     qdev_prop_set_uint8(coredev, "mrf-type", k->info->mrf_type);
-    qdev_prop_set_uint8(coredev, "version", d->fwversion);
+    qdev_prop_set_uint32(coredev, "version", d->fwversion);
 
     if(chr) {
         /* transfer the chardev to the core device */

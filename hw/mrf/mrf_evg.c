@@ -61,7 +61,8 @@ typedef struct {
 
     qemu_irq irq;
 
-    uint8_t mrftype, fwversion;
+    uint8_t mrftype;
+    uint32_t fwversion;
     /* bus bridge type
      * 0 - external PCI, LE byte order, ignore PCI IRQ mask
      * 1 - internal PCI, we manage byte order and honor PCI IRQ mask
@@ -249,7 +250,7 @@ evg_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         if(s->bridgetype==1 && s->fwversion>=0x8) {
             s->pciint = !!(val&0x40000000);
         } else {
-            ERR(LOG_GUEST_ERROR, "PCI MIE not available with FW version %u", s->fwversion);
+            ERR(LOG_GUEST_ERROR, "PCI MIE not available with FW version 0x%06x", s->fwversion);
         }
         break;
     case 0x20: /* buffer TX */
@@ -444,7 +445,7 @@ static void mrf_evg_reset(DeviceState *dev)
 static Property mrfevgport_properties[] = {
     DEFINE_PROP_UINT8("bridge-type", EVGState, bridgetype, 0),
     DEFINE_PROP_UINT8("mrf-type", EVGState, mrftype, 1),
-    DEFINE_PROP_UINT8("version", EVGState, fwversion, 6),
+    DEFINE_PROP_UINT32("version", EVGState, fwversion, 6),
     DEFINE_PROP_CHR("chardev", EVGState, chr),
     DEFINE_PROP_END_OF_LIST(),
 };
