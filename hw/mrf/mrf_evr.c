@@ -22,6 +22,7 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "qemu/bswap.h"
+#include "qemu/timer.h"
 #include "qapi/error.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
@@ -79,6 +80,9 @@ typedef struct EVRState {
     EVRFifoEntry fifo[512];
     unsigned fifo_in, fifo_out; /* buffer pointers */
 
+    // time of last timestamp counter reset
+    uint64_t tszero;
+
     // next index in dbuf RX array to write
     uint32_t dbuf_ptr;
 
@@ -87,6 +91,20 @@ typedef struct EVRState {
     uint8_t rxbuf[4];
     unsigned rxbuflen;
 } EVRState;
+
+static
+uint32_t mrf_ts_count(EVRState *s, bool reset)
+{
+    // nanoseconds since last reset
+    uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    uint64_t diff = now - s->tszero;
+    if(reset)
+        s->tszero = now;
+    // divider event clock to get 1MHz (TODO use frac synth)
+    uint64_t usdiv = s->evrreg[0x4c>>2];
+    // TODO: drive TS counter from other than event clock
+    return diff*usdiv/1000;
+}
 
 static
 void mrf_evr_update(EVRState *s)
@@ -158,7 +176,12 @@ evr_mmio_write(void *opaque, hwaddr addr, uint64_t val,
         } else {
             val &= ~0x02000000;
         }
-        val &= 0xff8067f8;
+        if(val&0x400) {
+            /* latch timestamp */
+            s->evrreg[0x68>>2] = s->evrreg[0x60>>2];
+            s->evrreg[0x6c>>2] = mrf_ts_count(s, 0);
+        }
+        val &= 0xff4043f8;
         break;
     /* masked registers */
     case 0x08: /* IRQFlag */
@@ -235,6 +258,10 @@ evr_mmio_read(void *opaque, hwaddr addr, unsigned size)
             s->evrreg[0x78>>2] = entry->code;
             DBGOUT(2,"FIFO dequeue %u %u %u", s->fifo_in, s->fifo_out, entry->code);
         }
+        break;
+    case 0x64:
+        s->evrreg[0x64>>2] = mrf_ts_count(s, 0);
+        break;
     }
 
     ret = s->evrreg[addr>>2];
@@ -286,10 +313,11 @@ void chr_link_read(void *opaque, const uint8_t *buf, int size)
             unsigned fifo_next = (d->fifo_in+1)%NELEM(d->fifo);
             uint8_t event = pbuf[2];
             uint32_t fifosave = d->evrreg[(0x4000+0x10*event+0)>>2]&0x80000000;
+            uint32_t nowevt = mrf_ts_count(d, event==125);
 
-            if(pbuf[1]&0x02)
+            if(pbuf[1]&0x02) {
                 DBGOUT(2,"Rx Event %02x DBus %02x", event, pbuf[3]);
-            else {
+            } else {
                 DBGOUT(2,"Rx Event %02x Data %02x", event, pbuf[3]);
                 uint32_t rxctrl = d->evrreg[0x20>>2] & 0xd000;
                 //uint8_t *buf = (uint8_t*)&d->evrreg[(0x800>>2)];
@@ -334,9 +362,26 @@ void chr_link_read(void *opaque, const uint8_t *buf, int size)
             } else {
                 EVRFifoEntry *ent = &d->fifo[d->fifo_in];
                 ent->code = event;
-                ent->sec = ent->count = 0; /* TODO */
+                ent->sec = d->evrreg[0x60>>2];
+                ent->count = nowevt;
                 d->fifo_in = fifo_next;
                 DBGOUT(2,"FIFO enqueue %u %u %u", d->fifo_in, d->fifo_out, event);
+            }
+
+            // TODO check mapping ram
+            if(event==125) {
+                // copy from sec shift register to latch
+                d->evrreg[0x60>>2] = d->evrreg[0x5c>>2];
+                d->evrreg[0x5c>>2] = 0xdeadbeef; // spoil
+                // d->tszero reset by earlier call to mrf_ts_count(, 1)
+
+            } else if(event==112 || event==113) {
+                // seconds shift register
+                uint32_t srsec = d->evrreg[0x5c>>2];
+                srsec<<=1;
+                if(event==113)
+                    srsec |= 1u;
+                d->evrreg[0x5c>>2] = srsec;
             }
         }
     }
