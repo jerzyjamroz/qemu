@@ -167,6 +167,12 @@ void mrf_pci_realize(PCIDevice *pci_dev, Error **perr)
 
     pci_dev->config[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
 
+    if (pci_is_express(pci_dev)) {
+        // msi_init(dev, 0x48, 1, true, false, perr);
+
+        pcie_endpoint_cap_init(pci_dev, 0x60);
+    }
+
     d->sbus = qbus_create(TYPE_MRF_BUS, DEVICE(pci_dev), "local");
 
     coredev = qdev_create(d->sbus, k->info->core);
